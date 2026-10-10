@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Motif-Index of Folk-Literature — 母题索引可视化</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <button class="navtoggle" id="navtoggle" title="目录">☰ 目录</button>
+  <div class="brand">
+    <div class="t1">Motif-Index of Folk-Literature</div>
+    <div class="t2">Stith Thompson · Revised &amp; Enlarged Edition (A–Z) · 1955–1958</div>
+  </div>
+  <div class="searchwrap" id="sw">
+    <div class="qmode" id="qmode">
+      <button data-qm="simple" class="on" title="子串匹配：编号、描述与引用文字">普通</button><button data-qm="adv" title="查询语言：字段、and/or、通配与正则（见「说明」页）">高级</button>
+    </div>
+    <input id="q" placeholder="搜索母题编号或关键词…　按 / 聚焦，Esc 清空" autocomplete="off" spellcheck="false">
+    <button class="clr" id="qclear" title="清空">×</button>
+    <div class="advmsg" id="advmsg" style="display:none"></div>
+  </div>
+  <nav class="histnav">
+    <button id="navback" class="hbtn" title="后退（也可用 Alt+←）" disabled>←</button>
+    <button id="navfwd" class="hbtn" title="前进（也可用 Alt+→）" disabled>→</button>
+  </nav>
+  <nav class="tabs">
+    <button data-view="browse" class="on">浏览</button>
+    <button data-view="atu">类型 · ATU</button>
+    <button data-view="tags">来源 · 标记</button>
+    <button data-view="refs">文献 · 书目</button>
+    <button data-view="stats">统计</button>
+    <button data-view="about">说明</button>
+  </nav>
+</header>
+
+<main>
+  <!-- ================= BROWSE ================= -->
+  <section id="view-browse" class="view on">
+    <aside id="sidebar">
+      <div class="filters">
+        <div class="frow">
+          <span class="flabel">章</span>
+          <div class="chips" id="chips"></div>
+          <button class="linkbtn" id="chall">全选</button>
+          <button class="linkbtn" id="chnone">清空</button>
+        </div>
+        <div class="frow">
+          <button class="linkbtn" id="resetall">重置</button>
+          <span id="fstat"></span>
+        </div>
+      </div>
+      <div class="treehead">
+        <b id="treelabel">分类树</b>
+        <input id="numjump" placeholder="跳转编号" spellcheck="false"
+               style="width:88px;padding:2px 6px;border:1px solid var(--line);border-radius:5px;font:600 11.5px var(--mono);background:var(--panel2)">
+        <span class="hint" id="treecount"></span>
+      </div>
+      <div id="scroller">
+        <div id="spacer"><div id="vlist"></div></div>
+        <div id="empty" style="display:none"></div>
+      </div>
+    </aside>
+    <div id="dragbar"></div>
+    <div id="pane"></div>
+  </section>
+
+  <!-- ================= ATU ================= -->
+  <section id="view-atu" class="view">
+    <div class="page"><div id="atu-body"></div></div>
+  </section>
+
+  <!-- ================= SOURCE TAGS ================= -->
+  <section id="view-tags" class="view">
+    <div class="page"><div id="tags-body"></div></div>
+  </section>
+
+  <!-- ================= REFS ================= -->
+  <section id="view-refs" class="view">
+    <div class="page"><div id="refs-body"></div></div>
+  </section>
+
+  <!-- ================= STATS ================= -->
+  <section id="view-stats" class="view">
+    <div class="page"><div id="stats-body"></div></div>
+  </section>
+
+  <!-- ================= ABOUT ================= -->
+  <section id="view-about" class="view">
+    <div class="page"><div class="wrap">
+      <h2 class="pt">使用说明</h2>
+      <p class="pd">S. Thompson《Motif-Index of Folk-Literature》修订扩大版（1955–58）的可检索阅读界面。
+        数据取自原书 PDF 的文本层，每个条目都可以与原书逐字对照。</p>
+
+      <div class="card" style="margin-top:26px">
+        <h4>条目与层级</h4>
+        <p style="color:var(--ink2);font-size:13px;line-height:1.85;margin:6px 0 0">
+          每条母题是「<i>斜体词头</i> + 描述」，后随文献注记：注记里的缩写悬停给出全称，点击可反查引用它的全部条目。
+          详情页另有一个默认折叠的「原书条目原文」，可与解析结果逐字对照。页码为 PDF 页序号（此版原书无印刷页码）。</p>
+        <p style="color:var(--ink2);font-size:13px;line-height:1.85;margin:10px 0 0">
+          左栏分类树自上而下：章（A–Z）→ 分类范围 → <b>组</b>（原书排成正体粗体的小标题）→ 母题 → 子母题。
+          原书偶有编号重复印刷（行尾 <span class="dup">×2</span> 角标，详情页可跳到另一处对照）。
+          正文中 <span class="xref">A32</span> 形式的编号可直接点击跳转。</p>
+      </div>
+
+      <div class="card" style="margin-top:26px">
+        <h4>检索</h4>
+        <p style="color:var(--ink2);font-size:13px;line-height:1.85;margin:6px 0 12px">
+          搜索框有「普通 / 高级」两档。普通档按子串匹配编号、描述与注记，单次上限 20,000 条；高级档是一门查询语言，语法见下。</p>
+      </div>
+
+      <div class="card" style="margin-top:26px">
+        <h4>高级检索：语法</h4>
+        <p style="color:var(--ink2);font-size:13px;line-height:1.85;margin:6px 0 12px">
+          搜索框切到「高级」后，输入的是条件而不是关键词：一个条件写成 <code>字段: 值</code>，
+          条件之间用 <code>and</code> / <code>or</code>（<code>and</code> 优先级更高）、
+          <code>not</code> 取反、括号分组。例如：
+        </p>
+        <p style="margin:0 0 12px"><code>within: (label A1) and depth: &gt;=group and (ref: *Types or region: Oceanic or body: /sun|moon/i)</code></p>
+        <p style="color:var(--ink2);font-size:13px;line-height:1.85;margin:0 0 12px">
+          取的是：位于 A1 指定的结构之内、层级在组或更深，并且（引用了形如 <code>*Types</code> 的文献，
+          或带 Oceanic 之下的来源标记，或描述匹配 sun|moon）的条目。
+        </p>
+        <table class="stat feat"><tbody>
+          <tr><td style="font-family:var(--mono)">label</td><td style="color:var(--ink2)">母题编号本身。裸词按<b>精确</b>匹配（<code>label: A1</code> 不含 A10）；<code>*</code> 作通配（<code>label: A1.*</code>），也可写正则</td></tr>
+          <tr><td style="font-family:var(--mono)">within</td><td style="color:var(--ink2)">在另一条件选出的结构的子树之内（含锚点自身）：<code>within: (label A1)</code>，简写 <code>within: A1</code>。包含关系按原书结构走：编号点分子孙 + 该条所开组的成员</td></tr>
+          <tr><td style="font-family:var(--mono)">depth</td><td style="color:var(--ink2)"><code>section</code>（分类范围的直属条目，不在任何组里）或 <code>group</code>（组内条目）；支持 <code>&gt;=</code> 等比较，如 <code>depth: &gt;=group</code></td></tr>
+          <tr><td style="font-family:var(--mono)">body</td><td style="color:var(--ink2)">只匹配<b>描述</b>文字；引用与词头各走各的字段</td></tr>
+          <tr><td style="font-family:var(--mono)">head</td><td style="color:var(--ink2)">只匹配斜体词头</td></tr>
+          <tr><td style="font-family:var(--mono)">ref</td><td style="color:var(--ink2)">匹配文献注记原文，星号算普通字符（<code>ref: *219</code> 按字面找）</td></tr>
+          <tr><td style="font-family:var(--mono)">region</td><td style="color:var(--ink2)">来源标记，沿收窄关系向上兼容：<code>region: Oceanic</code> 同时命中标 <code>Oceanic</code> 与标 <code>Oceanic (Tonga)</code> 的条目</td></tr>
+          <tr><td style="font-family:var(--mono)">star</td><td style="color:var(--ink2)"><code>star: 1</code> 至少引用一部单星文献；<code>star: 2</code> 带双星；<code>star: 3</code> 两者兼备</td></tr>
+          <tr><td style="font-family:var(--mono)">has</td><td style="color:var(--ink2)"><code>cite</code>（有文献注记）/ <code>name</code>（有词头）/ <code>group</code>（在组内）/ <code>xref</code>（有 † 交叉引用）/ <code>dup</code>（重复印刷编号）</td></tr>
+          <tr><td style="font-family:var(--mono)">page</td><td style="color:var(--ink2)">PDF 页序号，支持比较：<code>page: &lt;100</code></td></tr>
+        </tbody></table>
+        <p style="color:var(--ink2);font-size:13px;line-height:1.85;margin:12px 0 0">
+          值的四种写法：裸词（大小写不敏感子串）、<code>带*的词</code>（锚定通配）、
+          <code>"带空格的串"</code>（字面子串）、<code>/正则/flags</code>。
+          解析失败时搜索框下方会指出出错的字符位置；查询经 URL 的 <code>adv=1</code> 分享。
+        </p>
+      </div>
+
+      <div class="card" style="margin-top:26px">
+        <h4>记号</h4>
+        <p style="color:var(--ink2);font-size:13px;line-height:1.85;margin:6px 0 0">
+          文献注记与书目里：<b>*</b> 标有价值的异文汇编，<b>**</b> 标专题研究 —— 说的是文献的性质，不是母题的重要程度；
+          <b>☉</b> 标本索引自初版起据以编号的传统综览著作。每条例证的出处标记按
+          <span class="glabel k-geo">地区</span> / <span class="glabel k-people">民族 · 族群</span> /
+          <span class="glabel k-text">文献 · 宗教传统</span> 三类分列，收窄写法 <code>Africa (Wachaga)</code>
+          显示为 Africa › Wachaga；全部标记见「<a href="#v=tags">来源 · 标记</a>」页。</p>
+      </div>
+
+      <div class="card" style="margin-top:26px">
+        <h4>快捷键</h4>
+        <table class="stat feat"><tbody>
+          <tr><td style="font-family:var(--mono)">/</td><td style="color:var(--ink2)">聚焦搜索框</td></tr>
+          <tr><td style="font-family:var(--mono)">Esc</td><td style="color:var(--ink2)">清空搜索</td></tr>
+          <tr><td style="font-family:var(--mono)">Alt+← / Alt+→</td><td style="color:var(--ink2)">后退 / 前进</td></tr>
+        </tbody></table>
+      </div>
+    </div></div>
+  </section>
+</main>
+
+<button id="totop" title="回到顶部">↑ 顶部</button>
+<div class="toast" id="toast"></div>
+
+<script src="build/data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
