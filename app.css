@@ -180,6 +180,11 @@ select.mini{max-width:150px;padding:2px 5px;border:1px solid var(--line);border-
   border-radius:6px;padding:12px 14px;font-size:14px}
 .citelist{background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:11px 13px;
   font-size:13.2px;line-height:1.95;white-space:pre-wrap;color:var(--ink2)}
+/* the note as one row per source unit, the works it names underneath */
+.citelist .citerow{padding:7px 0;border-bottom:1px dotted var(--line2)}
+.citelist .citerow:last-child{border-bottom:0}
+.citelist .ct{color:var(--ink2)}
+.citelist .fulls{margin-top:4px;padding-left:16px;color:var(--muted);font-size:12px;line-height:1.7}
 .ck{cursor:pointer;border-bottom:1px solid var(--faint);padding-bottom:1px;
   font-family:var(--mono);font-size:12.4px;color:#5c5344}
 .ck:hover{color:var(--accent);border-bottom-color:var(--accent);background:var(--accent-soft)}
@@ -419,4 +424,8 @@ table.stat.refs th{white-space:nowrap}
   .tabs button{padding:4px 7px;font-size:11.5px}
   .qmode button{padding:3px 6px}
   .dnum{font-size:19px !important}
+  /* touch targets: taller rows, a triangle worth a fingertip */
+  :root{--row:36px}
+  .row{font-size:13.5px;gap:7px;padding-right:12px}
+  .row .tw{width:28px;font-size:13px}
 }

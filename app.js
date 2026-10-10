@@ -1143,11 +1143,20 @@ function flatten() {
 }
 
 /* ============================ virtual list ============================ */
+/* the row height lives in CSS (`--row`, taller on phones); the virtual-list
+   arithmetic reads it per render, so a breakpoint change needs no reload */
 var ROWH = 23, BUF = 12, scroller, spacer, vlist, curRows = null;
+function rowHeight() {
+  if (typeof getComputedStyle !== 'function') return 23;
+  var v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--row'));
+  return isNaN(v) ? 23 : Math.round(v);
+}
 function renderList(force) {
   if (!scroller) return;
+  ROWH = rowHeight();
   var rows = state.rows;
-  var total = rows.length * ROWH;
+  /* 60px of tail: the last row must clear the bottom edge, or phones cut it */
+  var total = rows.length * ROWH + (rows.length ? 60 : 0);
   spacer.style.height = total + 'px';
   var st = scroller.scrollTop, vh = scroller.clientHeight;
   var start = Math.max(0, Math.floor(st / ROWH) - BUF);
@@ -1456,36 +1465,84 @@ function xrefList(t) {
   });
   return out;
 }
+/* the note's two separator levels: ";" separates the items of one segment,
+   "--" opens a new segment (a new region, a different kind of research) --
+   never confused with a page range like 144--154, which sits inside an item
+   (a range never follows a full stop or stands between spaces the way the
+   separator does).  Returns unit ranges, trimmed of the separators. */
+function citeUnits(t) {
+  var units = [], start = 0, depth = 0, i = 0;
+  var push = function (end) {
+    while (start < end && /\s/.test(t.charAt(start))) start++;
+    while (end > start && /\s/.test(t.charAt(end - 1))) end--;
+    if (end > start) units.push({ s: start, e: end });
+  };
+  while (i < t.length) {
+    var ch = t.charAt(i);
+    if (ch === '(') depth++;
+    else if (ch === ')' && depth > 0) depth--;
+    else if (depth === 0) {
+      if (ch === ';') { push(i); start = i + 1; }
+      else if (ch === '-' && t.charAt(i + 1) === '-') {
+        var prev = i > 0 ? t.charAt(i - 1) : '';
+        var next = t.charAt(i + 2) || '';
+        if ((/[\.\)\?\!]/.test(prev) || /\s/.test(prev)) && /[A-Z*\u201c"(\[]/.test(next)) {
+          push(i); start = i + 2; i++;
+        }
+      }
+    }
+    i++;
+  }
+  push(t.length);
+  return units;
+}
+function citeChip(sp) {
+  var known = DICT.has(sp.key);
+  return '<span class="ck' + (known ? ' known' : '') + (sp.unc ? ' unc' : '') +
+    '" data-key="' + esc(sp.key) + '"' +
+    (known ? ' title="' + esc(DICT.get(sp.key).t) +
+      (sp.unc ? ' —— 未消歧：紧随其后的书名与该条目不符' : '') + '"' : '') +
+    '>' + esc(sp.lit) + '</span>';
+}
+/* ---- the bibliographic note, one row per source unit ----
+   Each row carries the unit exactly as cited (with its chips), followed by
+   the full titles of the works that unit names -- what the separate
+   full-title block used to say, now attached to the context it was cited
+   in.  An "ibid." keeps its resolution: the spans are computed over the
+   whole note before the units are cut. */
 function renderCite(i) {
   var t = MO[i][5];
   if (!t) return '<span class="hint">（原始条目未给出文献引用）</span>';
-  var spans = keySpans(t).map(function (sp) {
-    return { s: sp.s, e: sp.e, t: 'k', lit: t.slice(sp.s, sp.e), key: sp.k, unc: sp.unc };
-  });
-  var rs = groupSpans(t).map(function (g) {
+  var all = keySpans(t).map(function (sp) {
+    return { s: sp.s, e: sp.e, t: 'k', lit: t.slice(sp.s, sp.e), key: sp.k, st: sp.st, unc: sp.unc };
+  }).concat(groupSpans(t).map(function (g) {
     return { s: g.s, e: g.e, t: 'r', lit: t.slice(g.s, g.e), n: g.n, k: g.k, head: g.head };
+  })).sort(function (a, b) { return a.s - b.s || (b.e - b.s) - (a.e - a.s); });
+  var rows = citeUnits(t).map(function (u) {
+    var own = all.filter(function (sp) { return sp.s >= u.s && sp.e <= u.e; });
+    var pos = u.s, out = '', fulls = [], seenU = Object.create(null);
+    own.forEach(function (sp) {
+      if (sp.t === 'k' && DICT.has(sp.key) && !seenU[sp.key]) {
+        seenU[sp.key] = 1;
+        var r = DICT.get(sp.key);
+        fulls.push('<div>' + starHTML(sp.st) + esc(r.t) + (CONF[r.c] || '') +
+          ' <span class="hint">· ' + MAPKIND[r.y] + '</span></div>');
+      }
+    });
+    own.forEach(function (sp) {
+      out += esc(t.slice(pos, sp.s));
+      if (sp.t === 'r') {
+        out += '<span class="reg ck k-' + sp.k + '" data-reg="' + esc(sp.n) + '"' +
+          ' title="' + esc(KINDLABEL[sp.k] + (sp.head ? '（' + sp.head + '）' : '')) + '">' +
+          esc(sp.lit) + '</span>';
+      } else out += citeChip(sp);
+      pos = sp.e;
+    });
+    out += esc(t.slice(pos, u.e));
+    return '<div class="citerow"><div class="ct">' + out + '</div>' +
+      (fulls.length ? '<div class="fulls">' + fulls.join('') + '</div>' : '') + '</div>';
   });
-  var all = spans.concat(rs).sort(function (a, b) { return a.s - b.s || (b.e - b.s) - (a.e - a.s); });
-  var out = '', pos = 0;
-  for (var n = 0; n < all.length; n++) {
-    var sp = all[n];
-    if (sp.s < pos) continue;
-    out += esc(t.slice(pos, sp.s));
-    if (sp.t === 'r') out += '<span class="reg ck k-' + sp.k + '" data-reg="' + esc(sp.n) + '"' +
-      ' title="' + esc(KINDLABEL[sp.k] + (sp.head ? '（' + sp.head + '）' : '')) + '">' +
-      esc(sp.lit) + '</span>';
-    else {
-      var known = DICT.has(sp.key);
-      out += '<span class="ck' + (known ? ' known' : '') + (sp.unc ? ' unc' : '') +
-        '" data-key="' + esc(sp.key) + '"' +
-        (known ? ' title="' + esc(DICT.get(sp.key).t) +
-          (sp.unc ? ' —— 未消歧：紧随其后的书名与该条目不符' : '') + '"' : '') +
-        '>' + esc(sp.lit) + '</span>';
-    }
-    pos = sp.e;
-  }
-  out += esc(t.slice(pos));
-  return out;
+  return rows.join('');
 }
 function paneEmpty() {
   var year = D.meta;
@@ -1541,8 +1598,6 @@ function renderPane() {
   var i = state.sel, m = MO[i];
   var ks = keysOf(m[5]), rs = groupSpans(m[5]);
   var uniq = xrefList(m[4]);
-  var known = ks.filter(function (k) { return k.known; });
-  var unknown = ks.filter(function (k) { return !k.known; });
 
   var h = '<div class="doc">';
   h += backBar();          /* generic: wherever this page was reached from */
@@ -1595,35 +1650,14 @@ function renderPane() {
 
   h += atuSectionHTML(m[0]);
 
-  h += '<div class="sect"><h3>外部文献引用</h3>';
+  var nUnits = m[5] ? citeUnits(m[5]).length : 0;
+  h += '<div class="sect"><h3>文献注记' + (nUnits ? '（' + nUnits + ' 条）' : '') + '</h3>';
   if (!m[5]) h += '<div class="hint">该条目未附文献引用。</div>';
-  else {
-    h += '<div class="citelist" id="citebox">' + renderCite(i) + '</div>';
-    if (known.length || unknown.length) {
-      h += '<div style="margin-top:10px" class="tagrow">' +
-        known.map(function (k) {
-          return '<span class="tag" data-key="' + esc(k.k) + '" title="' + esc(DICT.get(k.k).t) + '">' +
-            esc(k.k) + starHTML(k.s) + '</span>';
-        }).join('') +
-        unknown.map(function (k) {
-          return '<span class="tag" data-key="' + esc(k.k) + '" style="opacity:.7">' +
-            esc(k.k) + starHTML(k.s) + '</span>';
-        }).join('') + '</div>';
-    }
-  }
+  else h += '<div class="citelist" id="citebox">' + renderCite(i) + '</div>';
   if (rs.length) {
     h += groupRowHTML(rs, true);
   }
   h += '</div>';
-
-  /* known-source expansion */
-  if (known.length) {
-    h += '<div class="sect"><h3>引用文献全称</h3><div class="srcbox">' + known.map(function (k) {
-      var r = DICT.get(k.k);
-      return '<div class="row2"><div class="k">' + esc(k.k) + '</div><div class="v">' + esc(r.t) +
-        CONF[r.c] + ' <span class="hint">· ' + MAPKIND[r.y] + '</span></div></div>';
-    }).join('') + '</div></div>';
-  }
 
   /* children / siblings */
   if (kidM[i] > 0) {
@@ -1980,11 +2014,11 @@ function renderRefs() {
     '非洲、西印度、犹太与印度传统等；书目（p. 37）以 ☉ 标出，这类著作只按母题编号给参照。' +
     '「被引」列是该缩写在本索引正文中出现的条目数（「—」表示原书书目表收了它、正文却没引）。' +
     '标<span class="hint">全称待考</span>者是正文用过一两次、Thompson 自己也没收进书目表的作者姓氏与短书名，' +
-    '照原样列出，不作臆测。点击任意一行可反查引用它的母题条目。</p>' +
-    '<p class="hint" style="margin-top:-6px">原书书目表转写自 University of Missouri Libraries 的 ' +
+    '照原样列出，不作臆测。点击任意一行可反查引用它的全部条目。' +
+    '原书书目表转写自 University of Missouri Libraries 的 ' +
     '<a href="https://libraryguides.missouri.edu/c.php?g=1052463" target="_blank" rel="noopener">' +
-    'Thompson Folk Motif Index Bibliography</a>（<code>tools/fetch_biblio.py</code>，逐字母段抓取后按首字母重排 —— ' +
-    '原站 A–B / C–E / F–H / I–M / N–S / T–Z 的分组只是分页，不是 Thompson 的分类）。</p>' +
+    'Thompson Folk Motif Index Bibliography</a>（原站 A–B / C–E / F–H / I–M / N–S / T–Z 的分组只是分页，' +
+    '不是 Thompson 的分类）。</p>' +
     '<div class="frow" style="margin:14px 0 10px">' +
     '<input id="refq" placeholder="过滤缩写或全称…" value="' + esc(state.refQ || '') + '" style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;background:var(--panel);width:290px;outline:none">' +
     '<label class="tiny"><input type="checkbox" id="litcited"' + (state.litCited ? ' checked' : '') + '> 只看正文引用过的</label>' +
@@ -2170,13 +2204,11 @@ function renderATU() {
     '</b> 处母题（去重后 ' + Object.keys(ATM).length.toLocaleString() + ' 个不同母题），' +
     '反过来有 <b>' + Object.keys(ATM).length.toLocaleString() + '</b> 条母题条目能列出它出现在哪些类型里。' +
     '另有 <b>' + ATX.length.toLocaleString() + '</b> 篇可在线阅读的异文（全部为 Internet Archive 的数字化原书，' +
-    '来自 ' + nO + ' 个地区 / 民族的民间故事集）。点击任一行看该类型的详情。</p>' +
-    '<p class="hint" style="margin-top:-6px">类型条目与「ATU ↔ 母题」对照表转录自 University of Missouri Libraries 的 ' +
+    '来自 ' + nO + ' 个地区 / 民族的民间故事集）。点击任一行看该类型的详情。' +
+    '类型条目与「ATU ↔ 母题」对照表转录自 University of Missouri Libraries 的 ' +
     '<a href="https://libraryguides.missouri.edu/Linked-ATU-Tales" target="_blank" rel="noopener">Linked ATU Tales</a> ' +
     '与同项目的 <a href="https://libraryguides.missouri.edu/c.php?g=1039894&p=7609090" target="_blank" rel="noopener">' +
-    'ATU-AT-Motif</a> 两份指南（<code>tools/fetch_atu.py</code> 抓取，存档在 <code>ref/atu/</code>）；' +
-    '类型名与梗概取自 <code>ref/atu.txt</code>。母题编号在对照表里偶有尾部重复印刷' +
-    '（<code>D1711.0.1.0.1</code> 实为 <code>D1711.0.1</code>），已按本索引实际印出的编号校正。</p>' +
+    'ATU-AT-Motif</a> 两份指南。</p>' +
     '<div class="frow" style="margin:14px 0 10px">' +
     '<input id="atuq" placeholder="过滤类型编号或名称…" value="' + esc(state.atuQ || '') + '" ' +
     'style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;background:var(--panel);width:300px;outline:none">' +
