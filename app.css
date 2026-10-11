@@ -401,9 +401,12 @@ table.stat.refs th{white-space:nowrap}
   .topbar{gap:12px;padding:8px 12px}
 }
 @media(max-width:980px){
-  /* the search drops to its own row and takes the width it needs */
-  .topbar{flex-wrap:wrap;row-gap:8px}
-  .searchwrap{order:10;flex:1 1 100%;max-width:none}
+  /* the search lives in its own scrolling row below the sticky bar -- a
+     two-row sticky bar would cover the top of every page, and an input
+     under 16px makes iOS zoom the viewport on focus */
+  .searchwrap{max-width:none}
+  .searchwrap input{font-size:16px}
+  .searchrow{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg)}
 }
 @media(max-width:900px){
   .navtoggle{display:inline-block}
@@ -416,11 +419,18 @@ table.stat.refs th{white-space:nowrap}
     transition:transform .18s ease;box-shadow:none}
   #view-browse.drawer-open aside{transform:none;box-shadow:8px 0 26px rgba(40,25,10,.20)}
 }
+@media(max-width:700px){
+  .brand{display:none}
+  /* belt: if the remaining row still overflows, it swipes instead of clipping */
+  .topbar{overflow-x:auto;scrollbar-width:none}
+  .topbar::-webkit-scrollbar{display:none}
+}
 @media(max-width:620px){
   .brand{display:none}
   .topbar{padding:7px 8px;gap:8px}
-  .doc{padding:14px 14px 70px}
-  .page{padding:14px 14px 70px}
+  /* room for the phone's own bottom UI under the last row / paragraph */
+  .doc{padding:14px 14px calc(96px + env(safe-area-inset-bottom,0px))}
+  .page{padding:14px 14px calc(96px + env(safe-area-inset-bottom,0px))}
   .tabs button{padding:4px 7px;font-size:11.5px}
   .qmode button{padding:3px 6px}
   .dnum{font-size:19px !important}

@@ -1155,8 +1155,9 @@ function renderList(force) {
   if (!scroller) return;
   ROWH = rowHeight();
   var rows = state.rows;
-  /* 60px of tail: the last row must clear the bottom edge, or phones cut it */
-  var total = rows.length * ROWH + (rows.length ? 60 : 0);
+  /* 90px of tail: the last row must clear the bottom edge -- on phones the
+     browser's own bottom UI would otherwise cover it */
+  var total = rows.length * ROWH + (rows.length ? 90 : 0);
   spacer.style.height = total + 'px';
   var st = scroller.scrollTop, vh = scroller.clientHeight;
   var start = Math.max(0, Math.floor(st / ROWH) - BUF);
@@ -2770,6 +2771,31 @@ function boot() {
   spacer = document.getElementById('spacer');
   vlist = document.getElementById('vlist');
   if (!scroller) return;
+
+  /* on phones the search drops out of the sticky top bar into a plain row
+     below it: a two-row sticky bar would cover the top of every page, and a
+     focused input under 16px makes iOS zoom the viewport.  The node is
+     moved, not copied, so its state (text, mode, error) survives. */
+  var searchMq = window.matchMedia ? window.matchMedia('(max-width:980px)') : { matches: false };
+  function placeSearch() {
+    var sw = document.getElementById('sw');
+    var bar = document.querySelector('.topbar');
+    var main = document.querySelector('main');
+    if (!sw || !bar || !main) return;
+    if (searchMq.matches && sw.parentNode === bar) {
+      var row = document.createElement('div');
+      row.className = 'searchrow';
+      row.appendChild(sw);
+      main.insertBefore(row, main.firstChild);
+    } else if (!searchMq.matches && sw.closest && sw.closest('.searchrow')) {
+      var row0 = sw.parentNode;
+      bar.insertBefore(sw, document.querySelector('.histnav'));
+      row0.parentNode.removeChild(row0);
+    }
+  }
+  if (searchMq.addEventListener) searchMq.addEventListener('change', placeSearch);
+  else if (searchMq.addListener) searchMq.addListener(placeSearch);
+  placeSearch();
 
   /* sidebar filters */
   var chips = document.getElementById('chips');
