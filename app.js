@@ -2555,9 +2555,12 @@ function setView(v) {
     if (pg2 && vs[v] !== undefined) pg2.scrollTop = vs[v];
   }
   /* the sidebar drawer only exists on the browse view; everywhere else the
-     目录 button would open something that is not there */
+     目录 button would open something that is not there.  The same goes for
+     the search row on phones -- other views need the screen height. */
   var nt = document.getElementById('navtoggle');
   if (nt) nt.style.display = v === 'browse' ? '' : 'none';
+  var sr = document.querySelector('.searchrow');
+  if (sr) sr.style.display = v === 'browse' ? '' : 'none';
   document.querySelectorAll('.tabs button').forEach(function (b) {
     b.classList.toggle('on', b.getAttribute('data-view') === v);
   });

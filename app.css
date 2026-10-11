@@ -429,8 +429,8 @@ table.stat.refs th{white-space:nowrap}
   .brand{display:none}
   .topbar{padding:7px 8px;gap:8px}
   /* room for the phone's own bottom UI under the last row / paragraph */
-  .doc{padding:14px 14px calc(96px + env(safe-area-inset-bottom,0px))}
-  .page{padding:14px 14px calc(96px + env(safe-area-inset-bottom,0px))}
+  .doc{padding:14px 14px calc(120px + env(safe-area-inset-bottom,0px))}
+  .page{padding:14px 14px calc(120px + env(safe-area-inset-bottom,0px))}
   .tabs button{padding:4px 7px;font-size:11.5px}
   .qmode button{padding:3px 6px}
   .dnum{font-size:19px !important}
