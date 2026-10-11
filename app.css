@@ -21,7 +21,10 @@
 }
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;height:100vh;display:flex;flex-direction:column;overflow:hidden;
+/* 100dvh tracks the *visible* viewport: with plain 100vh the app is one
+   browser-toolbar taller than the screen, and that strip hides under the
+   phone's own UI ("the bottom of the page is cut off"). */
+body{margin:0;height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden;
   background:var(--bg);color:var(--ink);font:13.5px/1.62 var(--sans);-webkit-font-smoothing:antialiased}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 input,select{font:inherit;color:inherit}
@@ -403,7 +406,10 @@ table.stat.refs th{white-space:nowrap}
 @media(max-width:980px){
   /* the search lives in its own scrolling row below the sticky bar -- a
      two-row sticky bar would cover the top of every page, and an input
-     under 16px makes iOS zoom the viewport on focus */
+     under 16px makes iOS zoom the viewport on focus.  The bar also goes
+     opaque: anything sliding beneath a translucent bar reads as layers
+     bleeding into each other. */
+  .topbar{background:var(--panel)}
   .searchwrap{max-width:none}
   .searchwrap input{font-size:16px}
   .searchrow{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--bg)}
@@ -421,21 +427,29 @@ table.stat.refs th{white-space:nowrap}
 }
 @media(max-width:700px){
   .brand{display:none}
-  /* belt: if the remaining row still overflows, it swipes instead of clipping */
-  .topbar{overflow-x:auto;scrollbar-width:none}
-  .topbar::-webkit-scrollbar{display:none}
 }
 @media(max-width:620px){
   .brand{display:none}
   .topbar{padding:7px 8px;gap:8px}
+  /* the browser's Back gesture covers history on a phone, so the two arrow
+     buttons give up their space and the row fits without scrolling -- a
+     scrollable bar used to slide 目录 out of sight when a tab was tapped */
+  .histnav{display:none}
   /* room for the phone's own bottom UI under the last row / paragraph */
   .doc{padding:14px 14px calc(120px + env(safe-area-inset-bottom,0px))}
   .page{padding:14px 14px calc(120px + env(safe-area-inset-bottom,0px))}
   .tabs button{padding:4px 7px;font-size:11.5px}
+  /* the tab strip scrolls inside its own box: 目录 stays put, the tail tabs
+     are a swipe away */
+  .tabs{flex:1 1 0;min-width:0;overflow-x:auto;scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
   .qmode button{padding:3px 6px}
   .dnum{font-size:19px !important}
   /* touch targets: taller rows, a triangle worth a fingertip */
   :root{--row:36px}
   .row{font-size:13.5px;gap:7px;padding-right:12px}
   .row .tw{width:28px;font-size:13px}
+}
+@media(max-width:380px){
+  .tabs button{padding:3px 5px;font-size:10.5px}
 }
