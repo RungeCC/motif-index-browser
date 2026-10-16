@@ -97,7 +97,10 @@ aside{width:376px;flex:0 0 auto;display:flex;flex-direction:column;border-right:
 .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
 select.mini{max-width:150px;padding:2px 5px;border:1px solid var(--line);border-radius:5px;background:var(--panel2);font-size:12px}
 .tiny{font-size:11.5px;color:var(--ink2);display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none}
-.tiny input{accent-color:var(--accent)}
+/* every checkbox follows the page's own palette -- the browser default is a
+   blue that has nothing to do with this theme (the local-mode 已检查 box was
+   the one that showed it) */
+input[type=checkbox]{accent-color:var(--accent)}
 #fstat{font-size:11px;color:var(--muted)}
 .linkbtn{color:var(--link);font-size:11.5px}
 .linkbtn:hover{text-decoration:underline}
@@ -122,18 +125,27 @@ select.mini{max-width:150px;padding:2px 5px;border:1px solid var(--line);border-
   letter-spacing:.4px;min-width:15px;text-align:center}
 .row .nm{flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;color:var(--ink2)}
 .row.k-ch .nm{font-weight:650;color:var(--ink);letter-spacing:.2px}
-.row.k-dv .nm{font-weight:600;color:var(--ink)}
+.row.k-dv .nm{font-weight:650;color:var(--ink)}
 /* a group: Thompson prints its title in upright bold, which is how the groups
    were found in the first place -- so the row borrows that weight, and marks
    itself with a thin left rule instead of a badge */
 .row.k-gr{box-shadow:inset 2px 0 0 var(--line2)}
 .row.k-gr:hover{box-shadow:inset 2px 0 0 var(--accent)}
-.row.k-gr .nm{font-weight:650;color:var(--ink)}
+/* a group heads entries, but it must not out-rank its own section: same
+   weight as the range head above it */
+.row.k-gr .nm{font-weight:600;color:var(--ink)}
 .row.k-gr .num{color:var(--ink2);font-weight:500}
 /* the tail of an entry's description, shown after its catchword */
 .row .rest{color:var(--faint);font-size:11.5px;margin-left:7px}
 .row .num{font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--accent);flex:0 0 auto}
 .row .cnt{margin-left:auto;font-size:10.5px;color:var(--faint);flex:0 0 auto;padding-left:8px}
+/* The sort value is a column, not a tail of the description: pinned to the
+   right edge so the same digit reads in the same place down the list, however
+   long the entry's name runs.  A row never carries both it and the child
+   count (the count belongs to the tree, the value to a result list), but if
+   one ever does, the value takes the slack and the count follows it. */
+.row .rc{margin-left:auto;flex:0 0 auto;padding-left:8px}
+.row .rc+.cnt{margin-left:0}
 .dup{font-size:9.5px;font-weight:700;color:#8a6a1f;background:#f3e6c4;
   border:1px solid #e2d0a2;border-radius:3px;padding:0 4px;cursor:help;line-height:15px}
 .row .dup{flex:0 0 auto;margin-left:6px}
@@ -144,13 +156,37 @@ select.mini{max-width:150px;padding:2px 5px;border:1px solid var(--line);border-
 
 /* ---------- main pane ---------- */
 #pane{flex:1 1 auto;overflow:auto;background:var(--bg);padding:0}
+/* Reserve the scrollbar's width on every scrolling panel.  Without it a panel
+   that grows just tall enough to scroll loses ~11px to the scrollbar, so the
+   centred column (and the right-aligned counts) jump sideways as you move
+   between a short page and a long one.  `stable` keeps the gutter reserved
+   whether or not a scrollbar is currently showing. */
+#scroller,#pane,.page{scrollbar-gutter:stable}
 .doc{max-width:940px;margin:0 auto;padding:22px 34px 90px}
+/* The sticky strip has to hold from the very first pixel.  While the page's
+   22px top gap lived on .doc, it sat above the strip in the flow, so the strip
+   scrolled through those 22px and only then caught top:0 -- stepping from one
+   entry to the next slid the buttons, which is where the reader's finger is.
+   Pages whose first child is not the strip keep the gap untouched. */
+.doc:has(>.backbar:first-child){padding-top:0}
 .dhead{border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:16px}
 .dnum{font-family:var(--mono);font-size:30px;font-weight:700;color:var(--accent);letter-spacing:-.5px;line-height:1.1}
 .dtitle{font-size:19px;font-weight:600;margin-top:5px;line-height:1.42}
 /* an entry prints as two parts: Thompson's catchword (italic in the book) and
    the prose description that follows it */
 .dtitle .ttl{font-style:italic;font-weight:600;color:var(--ink)}
+/* The detail page's title line is a row: the title keeps the left, the parse
+   confidence chip holds the far right of the same line.  Only the detail pane
+   gets .confrow -- the other heads that borrow .dtitle (a division, a group, a
+   chapter, a result set) have no chip to align and keep the plain block.  The
+   title sits in its own .dtxt so the row can be flex at all: .dtitle's content
+   is prose with xref chips in it, and flex would turn every one of those into
+   a separate item and stop it reading as one paragraph.  Baseline, so a title
+   that wraps leaves the chip level with its first line rather than centred on
+   the block. */
+.dtitle.confrow{display:flex;align-items:baseline;gap:14px}
+.dtitle.confrow>.dtxt{flex:1 1 auto;min-width:0}
+.dtitle.confrow>.conf{flex:0 0 auto}
 .ddesc{margin-top:8px;font-size:14.6px;line-height:1.72;color:var(--ink)}
 .crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:9px;font-size:11.5px;color:var(--muted)}
 .crumbs a,.crumbs span.cb{cursor:pointer;color:var(--ink2);border-bottom:1px dotted var(--faint)}
@@ -185,13 +221,44 @@ select.mini{max-width:150px;padding:2px 5px;border:1px solid var(--line);border-
   font-size:13.2px;line-height:1.95;white-space:pre-wrap;color:var(--ink2)}
 /* the note as one row per source unit, the works it names underneath */
 .citelist .citerow{padding:7px 0;border-bottom:1px dotted var(--line2)}
+/* a darker rule where the note itself changed segment ("--"); the previous
+   row's dotted line steps aside so the two never stack */
+.citelist .citerow.segstart{border-top:1px solid #8a7460;margin-top:8px;padding-top:9px}
+.citelist .citerow:has(+ .citerow.segstart){border-bottom:none}
 .citelist .citerow:last-child{border-bottom:0}
+/* local mode: the 已检查 box and the 本地× switch arrive together in the
+   .loctools seat the detail pane leaves between the tree button and the step
+   group; the action row holds nothing else that is local, and the confidence
+   chip is not in it at all -- it lives in the head.  Empty .loctools is
+   display:none, so the published copy -- which has no local fragment to fill
+   it -- lays the row out exactly as before. */
+.loctools{display:inline-flex;align-items:center;gap:8px;flex:0 0 auto}
+.loctools:empty{display:none}
+.loc-chk{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink2);
+  border:1px solid var(--line);border-radius:7px;padding:4px 9px;background:var(--panel2);
+  white-space:nowrap;flex:0 0 auto}
+/* The parse-confidence chip -- published, on every entry page, at the far right
+   of the title line -- and the per-row value a `sort:` pipe shows: the digit
+   the reader is judging the order by, whatever key that is.  The tints follow
+   the tree's own palette: green can be trusted, brown is ordinary, red look
+   again. */
+.conf{display:inline-flex;align-items:center;justify-content:center;text-align:center;
+  font-family:var(--mono);font-size:12px;line-height:1.25;padding:3px 9px;border-radius:9px;white-space:nowrap}
+.conf.c-hi{background:#e7efe4;color:#3f7d54}
+.conf.c-mid{background:#f2ecdf;color:#8a5a2b}
+.conf.c-lo{background:#f5e4e1;color:#a8483f}
+.rc{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}
 .citelist .ct{color:var(--ink2)}
 .citelist .fulls{margin-top:4px;padding-left:16px;color:var(--muted);font-size:12px;line-height:1.7}
 .ck{cursor:pointer;border-bottom:1px solid var(--faint);padding-bottom:1px;
   font-family:var(--mono);font-size:12.4px;color:#5c5344}
 .ck:hover{color:var(--accent);border-bottom-color:var(--accent);background:var(--accent-soft)}
 .ck.known{color:#3f5d3a;border-bottom-color:#9fb89a}
+/* a resolution the note itself casts doubt on: the next word reads like a
+   title the dictionary entry never names ("*Feilberg Am Urquell") */
+.ck.unc{border-bottom-style:dotted;border-bottom-color:#b06a2c;color:#7a4a1e}
+/* a chip the dictionary has nothing under ("**DeCock", "Ur-Quell") */
+.ck.unk{border-bottom-style:dotted;color:var(--muted)}
 /* a resolution the note itself casts doubt on: the next word reads like a
    title the dictionary entry never names ("*Feilberg Am Urquell") */
 .ck.unc{border-bottom-style:dotted;border-bottom-color:#b06a2c;color:#7a4a1e}
@@ -202,6 +269,12 @@ select.mini{max-width:150px;padding:2px 5px;border:1px solid var(--line);border-
 .reg.k-geo{color:#4a6f8a}
 .reg.k-people{color:#7a5a8e}
 .reg.k-text{color:#8a6a3a}
+/* a mark only a list of variants vouches for ("(Eskimo, Cherokee, Mandan,
+   Kiowa, Thompson River, Bella Coola)").  The corpus never prints it in front
+   of a colon, so it is a reading of the note, not a printed source mark: it
+   keeps its place and its colour, and says so with a dotted rule. */
+.reg.poss{opacity:.8;border-bottom:1px dotted var(--faint);padding-bottom:1px}
+.reg.poss:hover{opacity:1}
 .grow{display:flex;gap:8px;align-items:baseline;margin-bottom:4px}
 .glabel{flex:0 0 auto;font-size:10.5px;padding:1px 6px;border-radius:20px;
   border:1px solid var(--line);color:var(--muted);background:var(--panel2)}
@@ -211,6 +284,10 @@ select.mini{max-width:150px;padding:2px 5px;border:1px solid var(--line);border-
 .tag.k-geo{border-color:#c3d6e2;color:#3d5d75}
 .tag.k-people{border-color:#cdbcda;color:#6a4a7e}
 .tag.k-text{border-color:#dccaa4;color:#7a5a2a}
+/* the possible tier: a dashed pill and a "?" that the stats never count */
+.tag.poss{border-style:dashed;border-color:#cdae7f;opacity:.9}
+.tag.poss:hover{opacity:1;border-color:var(--accent)}
+.tag .q{font-family:var(--mono);font-size:9.5px;color:var(--accent);margin-left:3px;vertical-align:1px}
 .gparent{color:var(--faint)}
 .gdot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:1px}
 .gdot.k-geo{background:#4a6f8a}
@@ -229,7 +306,11 @@ select.mini{max-width:150px;padding:2px 5px;border:1px solid var(--line);border-
   padding-top:12px;border-top:1px solid var(--line)}
 .kv{display:flex;gap:6px}
 .kv b{font-weight:600;color:var(--ink2)}
-.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+/* the action row's items sit on one centre line -- with the default
+   `align-items:stretch` the confidence pill was pulled down to the buttons'
+   height and its text hung at the top of the tint (the pill looked taller
+   than everything beside it) */
+.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;align-items:center}
 .btn{border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:5px 11px;font-size:12.3px;color:var(--ink2)}
 .btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 .btn[disabled]{opacity:.4;cursor:default}
@@ -315,6 +396,15 @@ table.bib td.bm .starmark:first-child{margin-left:0}
   color:#7a6320;font-size:12.4px;line-height:1.7}
 .dupnote b{color:#5f4c14}
 .dupnote a{color:var(--link);cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+/* the dagger and digit Thompson ties to a description, and the note it stands
+   for.  The mark keeps the printed shape; the note is printed under the
+   description, because two of the six carry a table that has no margin. */
+.fnmark{font-family:var(--mono);font-size:12.4px;color:var(--accent);cursor:help;
+  padding:0 1px;border-bottom:1px dotted var(--accent)}
+.fnmark.none{color:var(--faint);border-bottom-style:dashed;cursor:default}
+.fnnote{margin:7px 0 0;padding:8px 11px;border-radius:8px;background:var(--panel2);
+  border:1px solid var(--line);font-size:13.2px;line-height:1.78;color:var(--ink2)}
+.fnlab{display:block;font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-bottom:3px}
 .tagrow{display:flex;flex-wrap:wrap;gap:5px}
 .tag{font-size:11.5px;padding:1px 7px;border-radius:20px;background:var(--panel);border:1px solid var(--line);
   color:var(--ink2);cursor:pointer}
@@ -325,7 +415,60 @@ table.bib td.bm .starmark:first-child{margin-left:0}
 .placeholder .big{font-size:15px;color:var(--ink2);margin-bottom:8px}
 
 /* ---------- search result list / back bar ---------- */
-.backbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 14px}
+/* The strip that opens every page.  It is always drawn, at a fixed height, so
+   its place never depends on how tall the title or the breadcrumb trail below
+   it happens to be (that is what used to push the action row up and down from
+   one page to the next); it sticks to the top so it stays reachable down a
+   long entry.  `nowrap` plus a hidden horizontal overflow is what keeps the
+   height constant when the buttons outgrow a narrow window. */
+.backbar{position:sticky;top:0;z-index:6;display:flex;align-items:center;gap:10px;
+  flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;min-height:46px;margin:0 0 14px;
+  background:var(--bg);border-bottom:1px solid var(--line);scrollbar-width:none}
+.backbar::-webkit-scrollbar{display:none}
+/* the action row rides inside the strip now: it must not add a top gap of its
+   own, and it must not wrap either -- a wrap would change the strip's height.
+   It takes the width left over by the Back button and the query hint, so that
+   what is pinned inside it is pinned to the end of the *strip*, not to the end
+   of a box that happens to be as wide as its own contents. */
+.backbar .acts{margin-top:0;flex-wrap:nowrap;flex:1 0 auto}
+/* The step pair is pinned to the right edge of the strip, on its own: what
+   sits in front of it (the Back label, the query, the way into the result
+   list) changes width from one page to the next, and the arrows used to slide
+   with it -- the one control the reader reaches for without looking.  The
+   confidence chip rides along on their right. */
+.backbar .steps{margin-left:auto;display:flex;align-items:center;gap:8px;flex:0 0 auto}
+/* While a search is live the strip is two rows: the search context (back, the
+   way into the result list, the query and its count) on the first, the entry's
+   action row on the second.  Two thoughts, two lines -- sharing one made the
+   long query and the long action row fight over the width, and the loser was
+   always the buttons.  This is the one place the strip is allowed to break;
+   inside either group nothing breaks (see the nowrap rules below). */
+.backbar.q{flex-wrap:wrap;overflow-x:hidden;gap:6px 10px;padding:5px 0}
+.backbar.q>.brow{display:flex;align-items:center;gap:10px;flex:1 1 100%;min-width:0}
+.backbar.q>.acts{flex:1 0 100%}
+/* no button label in the strip may break across two lines: a wrapped word
+   made the whole row taller and pushed the page below it down.  The strip
+   scrolls sideways instead (overflow-x above), which is what its nowrap is
+   for in the first place. */
+.backbar .btn{flex:0 0 auto;white-space:nowrap}
+/* The query hint was the one member of the strip still free to wrap, because
+   it is not a button -- and it is the only one long enough to do it.  Clipped
+   like the Back label instead: the query it repeats is right there in the box
+   above, so an ellipsis here loses nothing and the strip keeps one line. */
+.backbar>.hint{flex:0 1 auto;min-width:0;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+/* The Back button is always rendered, even with nowhere to go back to: a
+   fixed width keeps the strip from reflowing, the label ellipsises when the
+   previous page's name is long, and the disabled state greys it out rather
+   than removing it. */
+.btn.back{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;
+  min-width:96px;max-width:min(46%,320px)}
+.btn.back .blab{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+/* Every button in the strip greys out the same way when it has nowhere to go:
+   Back with no history behind it, ↑ on the first printed line, ↓ on the last.
+   Colour and background go muted as well as the opacity, otherwise a dead
+   arrow still wears the accent border of a live one. */
+.backbar .btn[disabled]{opacity:.55;color:var(--muted);background:var(--panel2);border-color:var(--line2)}
 .reslist{border-top:1px solid var(--line2)}
 .resrow{display:flex;gap:10px;align-items:baseline;padding:5px 7px;border-bottom:1px solid var(--line2);
   cursor:pointer;border-radius:4px}
@@ -334,6 +477,9 @@ table.bib td.bm .starmark:first-child{margin-left:0}
 .resrow .num{font-family:var(--mono);font-weight:600;color:var(--accent);flex:0 0 auto;min-width:76px}
 .resrow .rdsc{flex:1 1 auto;color:var(--ink2);font-size:12.8px;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
+/* the same sort value the left-hand list shows, in the same right-hand column:
+   the two lists are the same result set, read in either pane */
+.resrow .rc{flex:0 0 auto;align-self:center}
 .resmore{margin-top:14px;text-align:center;padding:6px 0}
 
 /* ---------- group page: the members as one nested item list ---------- */
@@ -445,6 +591,11 @@ table.stat.refs th{white-space:nowrap}
   .tabs::-webkit-scrollbar{display:none}
   .qmode button{padding:3px 6px}
   .dnum{font-size:19px !important}
+  /* a long title on a phone would otherwise squeeze the confidence chip out of
+     shape: let the row wrap, and keep the chip on the right of whatever line
+     it lands on (auto margin, plus the column gap as a floor) */
+  .dtitle.confrow{flex-wrap:wrap;gap:6px 10px}
+  .dtitle.confrow>.conf{margin-left:auto}
   /* touch targets: taller rows, a triangle worth a fingertip */
   :root{--row:36px}
   .row{font-size:13.5px;gap:7px;padding-right:12px}

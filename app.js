@@ -11,11 +11,16 @@ var MO = D.mo, DV = D.dvs, CH = D.chs, REFDICT = D.refs;
    of geo / people / text -- "Africa" is a place, "Wachaga" a people and
    "Buddhist myth" neither of the two. */
 var GROUPS = D.groups || [];
+var SOLO = D.solo || [];   /* bold group headings with no entries beneath them */
+var FFCTITLES = D.ffc || {};  /* FFC publication number -> title (see tools/fetch_ffc.py) */
+var RREFMAP = new Map();      /* motif index -> entries citing it (built lazily) */
+(window.MI.rrefs || []).forEach(function (pair) { RREFMAP.set(pair[0], pair.slice(1)); });
 var KINDLABEL = { geo: '地区', people: '民族 · 族群', text: '文献 · 宗教传统' };
 var KINDORDER = ['geo', 'people', 'text'];
 var BIBLIO = D.bib || [];
 var STOPW = D.stop || [];
 var DUPS = D.dups || {};
+var FN = D.fn || {};   /* "<motif>:<fn>" -> [fn, vol, page, note text] */
 var N = MO.length, ND = DV.length, NC = CH.length;
 
 /* ============================ helpers ============================ */
@@ -246,7 +251,17 @@ var KEY_ABBR_G = new RegExp('\\*{0,2}\\b(?:' + KEY_ALT + ')(?!\\w)', 'g');
 var KEY_CAPS = /\*{0,2}\b[A-Z]{2,7}\b(?=\s*[IVXLC\d\u201c"])/g;
 var KEY_AUTH = /\*{0,2}\b[A-Z][a-z\u00c0-\u00ff\u2019'\-]{2,}(?=\s+(?:[IVXLC]{1,7}\b|\d))/g;
 var GKIND = new Map();
-GROUPS.forEach(function (g) { GKIND.set(g[0], g[1]); });
+/* Names the corpus only *suggests*.  They are members of a list of variants
+   that carries no colon of its own, or a head printed exactly once -- the
+   mining keeps them, but it cannot vouch for them ("(Eskimo, Cherokee,
+   Mandan, Kiowa, Thompson River, Bella Coola);" is one list of nine, and only
+   the first four print anywhere else).  The mark is drawn, in a style that
+   says so, and the tags page keeps them off the counts. */
+var GPOS = Object.create(null);
+GROUPS.forEach(function (g) {
+  GKIND.set(g[0], g[1]);
+  if (g[2]) GPOS[g[0]] = 1;
+});
 /* Thompson abbreviates the same source in several ways ("Icelandic" and
    "Icel.", "Am. Indian" and "A. Indian", "U.S." and "U.S.A."), and the
    corpus mining picked up both spellings as separate marks.  The alias
@@ -265,6 +280,7 @@ var TAG_ALIAS = {
   'Greek Myth': 'Greek myth',
   'Irish Myth': 'Irish myth',
   'Banks Is': 'Banks Is.',
+  'Cook Is': 'Cook Islands',
   'BaRonga': 'Ba Ronga',
   'Mono Alu': 'Mono-Alu',
   'U. S.': 'U.S.',
@@ -272,9 +288,27 @@ var TAG_ALIAS = {
   'A. Indian': 'Am. Indian',
   'S.A.': 'So. Am.',
   'U.S.A.': 'U.S.',
-  'New York State': 'New York'
+  'New York State': 'New York',
+  'persian': 'Persian',       /* the book prints it lowercase once (A1757) */
+  /* the abbreviated form, and the one printed form that is lowercase: B548.2.3
+     writes "(…, N. Pac. Coast Am. Indian, …)" for B470's "N. Pacific Coast
+     American Indian", and F531 writes "U.S. (lumbermen):". */
+  'N. Pac. Coast Am. Indian': 'N. Pacific Coast American Indian',
+  'lumbermen': 'Lumbermen'
 };
 function tagCanon(name) { return TAG_ALIAS[name] || name; }
+/* FFCTITLES -- the FFC catalogue, publication number -> title -- is bound in
+   00-data.js; "FFC LX" is Qvigstad's Lappische Märchen- und Sagenvarianten.
+   Citations name the number in roman numerals. */
+function romanVal(s) {
+  var R = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1000 }, out = 0, prev = 0;
+  for (var i = s.length - 1; i >= 0; i--) {
+    var v = R[s.charAt(i)];
+    if (!v) return 0;
+    if (v < prev) out -= v; else { out += v; prev = v; }
+  }
+  return out;
+}
 var G_ALT = GROUPS.map(function (g) { return rx(g[0]); }).join('|');
 /* One source unit, in the four shapes Thompson actually prints:
 
@@ -291,10 +325,22 @@ var G_ALT = GROUPS.map(function (g) { return rx(g[0]); }).join('|');
    parenthesised page reference such as "Grenfell (Baluba) 814f.".  A group may
    also open straight after the "--" that separates two of them, as in
    "Thompson-Balys.--African:" -- the run of hyphens is consumed as a whole so
-   the head starts on the letter, and "Coster-Wijsman:" stays a name. */
+   the head starts on the letter, and "Coster-Wijsman:" stays a name.
+
+   Inside a run the separator may carry the head's own abbreviation stop in
+   front of the comma ("Solomon Is., New Britain:") -- without it the run
+   matched only its last head, exactly as in the splitter (A1255.1).
+
+   The bare qualifier the head may carry is either a capitalised word
+   ("Africa central") or "tribe(s)" ("Palaung tribe:", "Isthmian tribes
+   (Panama):").  ``tools/build_groups.py`` strips that word before it stores
+   the name, so the vocabulary has "Palaung" -- and a head that misses the
+   table drops out of the highlight, the tags page and the back-link index at
+   once. */
 var GRP_RE = new RegExp(
-  '(?:^|[\\s;(\\[]|-{2,})((?:' + G_ALT + ')(?:\\s+[A-Z][a-z]{2,14})?)?' +
-  '\\s*(\\(([^()]{1,90})\\))?\\s*:', 'g');
+  '(?:^|[\\s;(\\[]|-{2,})((?:' + G_ALT + ')(?:\\s+(?:[A-Z][a-z]{2,14}|tribes?))?' +
+  '(?:(?:\\.?\\s*,\\s*|\\s+and\\s+)(?:' + G_ALT + ')(?:\\s+(?:[A-Z][a-z]{2,14}|tribes?))?)*)?' +
+  '\\s*\\.?\\s*(\\(([^()]{1,90})\\))?\\s*\\.?\\s*:', 'g');
 var SUB_SPLIT = /\s*[,;]\s*|\s+and\s+/;
 /* The same clean-up ``tools/build_groups.py`` applies when it builds the
    vocabulary, so the tags shown in the UI are exactly the tags in the file:
@@ -307,9 +353,17 @@ function subName(t) {
   var s = String(t).replace(/^\s+|\s+$/g, '').replace(/^[.,;:]+|[.,;:]+$/g, '');
   s = s.replace(/\[[^\]]*\]/g, ' ').replace(/\s+/g, ' ').trim();
   if (s.length < 3 || s.length > 42 || /[\d()\[\]]/.test(s)) return '';
+  /* "in general" is Thompson's way of saying the mark is the whole area
+     ("(Pawnee and Plains in general):") -- it belongs to the phrase, not to
+     the name, and leaving it on made the member fail the junk-word test
+     below, which is how "Plains" was lost.  Mirrors ``clean()`` in
+     tools/build_groups.py, once before the "of X" cut and once after the
+     "tribe" strip. */
+  s = s.replace(/\s+in\s+general$/i, '');
   var cut = s.replace(/\s+(?:of|in)\s+[A-Z].*$/, '');
   if (cut.length >= 3 && !(cut.indexOf(' ') < 0 && SUB_DIR.test(cut))) s = cut;
   s = s.replace(/\s+tribes?$/i, '').replace(/[ .,]+$/, '').trim();
+  s = s.replace(/\s+in\s+general$/i, '').replace(/[ .,]+$/, '').trim();
   if (s.length < 3) return '';
   var ws = s.split(' ');
   if (ws.length > 4 || !/^[A-Z]/.test(s) || /^[IVXLCDM]+\.?$/.test(s)) return '';
@@ -317,6 +371,38 @@ function subName(t) {
     if (!SUB_WORD.test(ws[i]) || SUB_JUNK.test(ws[i])) return '';
   }
   return s;
+}
+/* The same strip ``clean()`` applies in build_groups.py, kept apart from
+   subName() so a vocabulary lookup can fall back on it without also
+   inheriting the junk-word and shape tests.  A head Thompson writes as
+   "Indians of Central Brazil" or "Isthmian tribes" is a name the table
+   carries bare -- "Indians", "Isthmian" -- because ``clean()`` takes the
+   qualifier off before the vocabulary is written; the head path has to take
+   it off the same way, or the head drops out of the highlight, the tags page
+   and the back-link index all at once.  "South of Zambesi" must stay whole,
+   which is why the "of X" cut is skipped when it would leave a bare direction
+   word behind. */
+function strippedName(t) {
+  var s = String(t).replace(/^\s+|\s+$/g, '');
+  s = s.replace(/\s+in\s+general$/i, '');
+  var cut = s.replace(/\s+(?:of|in)\s+[A-Z].*$/, '');
+  if (cut.length >= 3 && !(cut.indexOf(' ') < 0 && SUB_DIR.test(cut))) s = cut;
+  s = s.replace(/\s+tribes?$/i, '').replace(/\s+in\s+general$/i, '');
+  return s.replace(/[ .,]+$/, '');
+}
+/* The characters of one parenthetical member that the vocabulary knows, or ''.
+   The table is asked first, exactly as printed, because a printed form is
+   sometimes one clean() would never produce -- "U.S. (lumbermen)" names a
+   lowercase occupational group the junk-word test was written to reject, and
+   the alias table folds it onto the capitalised mark.  What comes back is the
+   *printed* substring, so the caller can measure it against the text. */
+function subPrinted(t) {
+  var s = String(t).replace(/^\s+|\s+$/g, '').replace(/^[.,;:]+|[.,;:]+$/g, '');
+  if (s && gkindOf(tagCanon(s)) !== undefined) return s;
+  var cut = strippedName(s);
+  if (cut && cut !== s && gkindOf(tagCanon(cut)) !== undefined) return cut;
+  var n = subName(t);
+  return n && gkindOf(tagCanon(n)) !== undefined ? n : '';
 }
 
 /* strip the star markers -- leading ones count (1 = * , 2 = **), any that
@@ -346,6 +432,74 @@ function startsUnit(cite, idx) {
   return ';:.,*("[\u2013\u2014\u201c'.indexOf(c) >= 0;
 }
 var ROMAN = /^[IVXLCDM]+$/;
+/* A special bibliography printed inside a note ("… SPECIAL BIBLIOGRAPHY FOR
+   †F420, †F451 AND †F531 AND SUBDIVISIONS …") lists its entries as "Surname,
+   Initials., Title, Place Year." -- a shape no key channel looks for, since
+   they all hunt "Surname Title Page".  Two defects came out of it (F420):
+     * "Müller, W.," is W. Müller, co-author of a Sagen collection the
+       dictionary has no entry for.  The key channel saw a bare surname and
+       pointed it at Müller's Egyptian Mythology instead.
+     * the "--" between two entries is followed by a capital, exactly like the
+       "--" that opens a source segment; but regionColonAhead() has no colon to
+       find inside a bibliography and called it a page range, so two entries
+       printed as one row ("… Göttingen 1855.-- Schnetzler, F.A.A., …").
+   Both need the same proof, and the imprint closing each entry is it: the
+   year.  "England, U.S., Wales: *Baughman" carries the identical author shape
+   and no year anywhere -- that one is a list of source marks, and the same
+   gate leaves it alone. */
+var BIB_CORE = "(?:v\\.\\s+|von\\s+)?[A-Z][A-Za-z\\u00c0-\\u00ff\\u2019'\\-]{1,24}"
+  + ",\\s+(?:(?:[A-Z]\\.|[A-Z][a-z]\\.)\\s*){1,4},"
+  + "(?:\\s*(?:and|und|&)\\s+[A-Z][A-Za-z\\u00c0-\\u00ff\\u2019'\\-]{1,24}"
+  + ",\\s+(?:(?:[A-Z]\\.|[A-Z][a-z]\\.)\\s*){1,4},)?";
+var RE_BIBITEM = new RegExp('(^|\\-{2,}\\s*|;|\\.\\s)(' + BIB_CORE + ')', 'g');
+var RE_BIBAT = new RegExp('^' + BIB_CORE);
+var BIB_YEAR = /(?:1[5-9]|20)\d\d/;
+/* The year closes the entry.  A "--" only closes it when a capital follows:
+   the dash of a year range ("Karlsruhe 1809--1853") is not a separator, and
+   cutting the window there would hide the very year the gate is asking for --
+   which is precisely the entry the reader could not read. */
+function bibYearAhead(t, e) {
+  var w = t.slice(e, e + 150), m = /--\s*(?=[A-Z])/.exec(w);
+  if (m) w = w.slice(0, m.index);
+  return BIB_YEAR.test(w);
+}
+/* the author run of an entry that opens exactly at ``at``, as {s,e}, or null */
+function bibItemAt(t, at) {
+  var m = RE_BIBAT.exec(t.slice(at, at + 130));
+  if (!m) return null;
+  var e = at + m[0].length;
+  return bibYearAhead(t, e) ? { s: at, e: e } : null;
+}
+/* every author run of a bibliographic entry in the note.  The run is not a
+   work reference and its surname must not reach the key channels, so
+   keySpans() closes these spans before any of them runs. */
+function bibSpans(t) {
+  var out = [], m;
+  RE_BIBITEM.lastIndex = 0;
+  while ((m = RE_BIBITEM.exec(t))) {
+    var s = m.index + m[1].length, e = s + m[2].length;
+    if (bibYearAhead(t, e)) out.push({ s: s, e: e });
+  }
+  return out;
+}
+/* A cross-reference is either one motif (†F531) or a stretch of the index
+   (†G100--199, †G500-- 699, †G400--†G599).  The second form addresses a
+   *division*, so it has to resolve to the division page -- reading it as the
+   motif whose number happens to start the range (G100) loses the whole point
+   of the reference.  The scanner sits here with the others because keySpans()
+   has to close the references to the key channels; 60-pane.js reads the same
+   regex in xrefOne() to draw the chips. */
+var RE_XREF = /\u2020\s?([A-Z])(\d+(?:\.\d+)*)\s*(?:([-\u2013\u2014]{1,2})\s*\u2020?\s*(?:([A-Z])\s?)?(\d+(?:\.\d+)*))?(ff|f)?/g;
+/* the same scan, as spans.  A reference is not a citation of a work:
+   "See †A900ff. for work of the transformers, with references." put a key span
+   over "See †A90", swallowed the dagger and left A72 pointing nowhere. */
+function xrefSpans(t) {
+  var out = [], m;
+  if (!t) return out;
+  RE_XREF.lastIndex = 0;
+  while ((m = RE_XREF.exec(t))) out.push({ s: m.index, e: m.index + m[0].length });
+  return out;
+}
 /* names that head a citation unit, so never an author or journal key */
 var REGSET = Object.create(null);
 GROUPS.forEach(function (g) { REGSET[g[0]] = 1; });
@@ -357,11 +511,21 @@ STOPW.forEach(function (s) { SKIP[s] = 1; });
 function keySpans(cite) {
   var res = [];
   if (!cite) return res;
-  var covered = [], m;
+  /* A source mark is never a work key: "(Cook Is.)" names the Cook Islands,
+     not Capt. Cook, and "Banks Is.: Dixon" is the island group, not a
+     bibliography.  The marks are scanned first and their spans are closed to
+     every channel below -- 242 chips used to be drawn on top of the mark they
+     sat inside, half of them a bare island name the general key rules read as
+     an author.  A † reference is closed to them for the same reason, and so is
+     the author run of a bibliographic entry inside a special bibliography
+     ("Schambach, G., and Müller, W.," -- see RE_BIBITEM), where a co-author's
+     surname would otherwise be read as a work of its own. */
+  var covered = groupSpans(cite).map(function (g) { return { s: g.s, e: g.e }; })
+    .concat(xrefSpans(cite)).concat(bibSpans(cite)), m;
   KEY_ABBR_G.lastIndex = 0;
   while ((m = KEY_ABBR_G.exec(cite))) {
     var c = cleanKey(m[0]);
-    if (SKIP[c.k]) { continue; }
+    if (SKIP[c.k] || inSpans(covered, m.index, m[0].length)) { continue; }
     covered.push({ s: m.index, e: m.index + m[0].length });
     res.push({ s: m.index, e: m.index + m[0].length, k: c.k, st: c.s, known: DICT.has(c.k) });
     if (KEY_ABBR_G.lastIndex === m.index) KEY_ABBR_G.lastIndex++;
@@ -378,6 +542,77 @@ function keySpans(cite) {
       }
       if (re.lastIndex === m.index) re.lastIndex++;
     }
+  }
+  /* "FFC LX" names publication 60 of the Folklore Fellows' Communications;
+     the catalogue says which one.  A chip that ends in FFC ("Qvigstad FFC")
+     grows over the number and takes the exact title as its tooltip. */
+  var FFC_RE = /\bFFC\s+([IVXLCDM]{1,7})\b/g, ff;
+  FFC_RE.lastIndex = 0;
+  while ((ff = FFC_RE.exec(cite))) {
+    if (inSpans(covered, ff.index, ff[0].length)) continue;
+    var fnum = romanVal(ff[1]), ftitle = fnum ? FFCTITLES[fnum] : '';
+    if (!ftitle) continue;
+    covered.push({ s: ff.index, e: ff.index + ff[0].length });
+    res.push({ s: ff.index, e: ff.index + ff[0].length, k: 'FFC ' + ff[1], st: 0,
+               known: true, ffc: ftitle });
+  }
+  for (var fe = 0; fe < res.length; fe++) {
+    var spf = res[fe];
+    if (!spf.known || !/FFC$/.test(spf.k)) continue;
+    var tail = cite.slice(spf.e, spf.e + 16).match(/^\s+([IVXLCDM]{1,7})\b/);
+    if (!tail) continue;
+    var fnum2 = romanVal(tail[1]), ftitle2 = fnum2 ? FFCTITLES[fnum2] : '';
+    if (!ftitle2) continue;
+    spf.e += tail[0].length;
+    spf.ffc = ftitle2;
+  }
+  /* an author followed by a title and a number, opening a unit: a work the
+     dictionary has nothing under ("Oldenberg Religion des Veda 171",
+     "Krause Der Ur-Quell I 1").  One unknown chip for the whole phrase --
+     KEY_AUTH alone would only catch the last title word before the number.
+     At least one title token is required, so plain "Author 270" stays with
+     the single-word rule.
+     Two things this pattern has to get right, and both were wrong:
+     * the span must be measured from the word, not from the match.  This is
+       the only one of the channels whose match opens on a separator ("\s",
+       "--", ". "), and taking wk.index for the start drew every one of its
+       chips one or two characters to the left -- 1,369 of them, the dotted
+       rule of "Leipzig 1921" sitting under " Leipzig 19" (F420).  wk[0] holds
+       the separator, so indexOf(wk[1]) lands on the author.
+     * the number that closes the phrase must stand as its own token, and the
+       phrase must end on a word rather than on an initial.  With "\s*[\(\d]"
+       the run could stop *inside* a year -- "Leipzig 1921" came out as a work
+       called "Leipzig 192" -- so the place of publication closing a
+       bibliography entry became an unknown chip, one per entry (35 of them in
+       F420's special bibliography, and the same shape all over: "Berlin 191",
+       "Jena 192", "Göttingen 1855").  Requiring the space makes the imprint
+       unmatchable ("1924" can only be a title token, and the tail then wants
+       whitespace before its digit), and the two trailing-token rules below
+       turn aside what the space alone still lets through -- "Frankfurt
+       a. M. 1873" would otherwise come out as a work called "Frankfurt
+       a. M.".  The real ones are untouched: "Krause Der Ur-Quell I 1" ends on
+       "I" (no stop), "Goldenweiser Early Civilization 10" on "Civilization". */
+  var WORK = /(?:^|[\s;(\[]|-{2,}|[.!]\s+)([A-Z][A-Za-z\u00c0-\u00ff\u2019'\-]{2,}(?:\s+(?=[^\s;(),:\[\]]*[A-Za-z])[^\s;(),:\[\]]{1,15}){1,3})\s+[\(\d]/g, wk;
+  WORK.lastIndex = 0;
+  while ((wk = WORK.exec(cite))) {
+    var wAt = wk.index + wk[0].indexOf(wk[1]);
+    if (inSpans(covered, wAt, wk[1].length)) continue;
+    if (!startsUnit(cite, wk.index)) continue;
+    /* "III Nos. 141--143" is a volume and its tale numbers, not a work called
+       "III Nos": a phrase that opens on a roman numeral is a printed volume
+       number and the WORK channel has no business claiming it (Q2, F531). */
+    if (ROMAN.test(wk[1].split(' ')[0])) continue;
+    /* A phrase that ends on the page marker ("Völsungasaga p.", "Gilgamesch-
+       Epos XII p.") or on a second bare initial ("Frankfurt a. M.", "Halle
+       a. S.") is not a title: the marker and the second initial belong to the
+       reference, not to the work.  Deliberately narrow -- a *single* trailing
+       initial is how the Icelandic sagas are cited ("Ketils saga H.", "Gríms
+       saga L.") and those must stay. */
+    var wToks = wk[1].split(' '), wLast = wToks[wToks.length - 1];
+    if (wLast === 'p.') continue;
+    if (/^[A-Za-z]\.$/.test(wLast) && wToks.length > 1 && /^[A-Za-z]\.$/.test(wToks[wToks.length - 2])) continue;
+    covered.push({ s: wAt, e: wAt + wk[1].length });
+    res.push({ s: wAt, e: wAt + wk[1].length, k: wk[1], st: 0, known: false });
   }
   addFrom(KEY_CAPS);
   addFrom(KEY_AUTH);
@@ -430,13 +665,29 @@ function keySpans(cite) {
   }
   return res;
 }
+/* The distinct keys of one citation, in first-appearance order.
+ *
+ * Memoised by the citation string, because the string repeats enormously:
+ * 46,251 entries carry 20,636 distinct citations, and two passes walk the
+ * whole corpus calling this once per entry -- buildReverseIndex() and the
+ * stats page's star count.  Those passes cost ~800 ms of keySpans() parsing
+ * each, which is the stall on the 统计 tab; the deduped key list is a pure
+ * function of the string, so it is worth keeping.
+ *
+ * Callers must treat the returned array (and its objects) as read-only --
+ * they are shared now. */
+var KEYS_OF = null;
 function keysOf(cite) {
+  if (!KEYS_OF) KEYS_OF = new Map();
+  var hit = KEYS_OF.get(cite);
+  if (hit) return hit;
   var sp = keySpans(cite), out = [], seen = Object.create(null);
   for (var i = 0; i < sp.length; i++) {
     if (seen[sp[i].k]) continue;
     seen[sp[i].k] = 1;
     out.push({ k: sp[i].k, s: sp[i].st, known: sp[i].known, unc: sp[i].unc });
   }
+  KEYS_OF.set(cite, out);
   return out;
 }
 
@@ -463,24 +714,189 @@ function starHTML(s) {
   return '<span class="starmark s' + s + '" title="' + what + '">' + '*'.repeat(s) + '</span>';
 }
 /* Every source tag in a note, with its position in the note so the citation
-   text can be highlighted from the same scan.  Returns [{s,e,n,k,head}] where
-   `head` is the region the tag was narrowed from ('' when it stands alone). */
-function groupSpans(cite) {
-  var out = [], seen = Object.create(null);
-  if (!cite) return out;
-  function add(name, s, e, from) {
-    if (!name || s < 0 || seen[name]) return;
-    name = tagCanon(name);          /* "Icel." counts as "Icelandic" */
-    var k = GKIND.get(name);
-    if (k === undefined) {
-      /* "Africa central" and friends: the vocabulary carries the bare name */
-      var bare = name.replace(/\s+[A-Z][a-z]{2,14}$/, '');
-      if (bare === name || !GKIND.has(bare)) return;
-      name = bare; k = GKIND.get(bare);
-      e = s + bare.length;
+   text can be highlighted from the same scan.  Returns [{s,e,n,k,head,pos}]
+   where `head` is the region the tag was narrowed from ('' when it stands
+   alone) and `pos` marks a name the corpus only suggests. */
+/* Look a mark up, tolerating the printed abbreviation stop.  The vocabulary
+   spells the islands without it ("Solomon Is"), the page prints it with it
+   ("Solomon Is., New Britain:"), and a head that misses the table drops out of
+   the citation highlight, the tags page and the back-link index all at once.
+   The name is returned as the vocabulary spells it; the span keeps covering
+   the printed text. */
+function gkindOf(name) {
+  var k = GKIND.get(name);
+  if (k === undefined && name.charAt(name.length - 1) === '.') {
+    k = GKIND.get(name.replace(/\.$/, ''));
+  }
+  return k;
+}
+/* The names of a head run, or [head] when it is one name -- or when no split
+   resolves.  The general separator splits on "and", and "and" is not always a
+   separator: A625.2 prints "Central and Western Polynesia, Hawaii, Samoa:",
+   where splitting on the "and" left "Central", a bare direction word the
+   table has never had, so the whole run went to subName() as a single
+   43-character name and was rejected -- and three marks went missing.  The
+   comma-only split is tried when the general one fails, so a run that already
+   works is left exactly as it was. */
+function headRunParts(head) {
+  var tries = [head.split(SUB_SPLIT), head.split(/\s*,\s*/)];
+  for (var ti = 0; ti < tries.length; ti++) {
+    var parts = tries[ti], ok = parts.length > 1;
+    for (var pi = 0; pi < parts.length && ok; pi++) {
+      var pt = parts[pi].replace(/^\s+|\s+$/g, '');
+      if (!pt || gkindOf(tagCanon(pt)) === undefined) ok = false;
     }
-    seen[name] = 1;
-    out.push({ s: s, e: e, n: name, k: k, head: from === name ? '' : from });
+    if (ok) return parts;
+  }
+  return [head];
+}
+/* The three shapes a source unit takes that carry no colon of their own, and
+   that the colon scan therefore cannot see:
+
+     (N. Pac. Coast, Chinook, …, Kalapuya);   the sources of a list of variants
+     (Maidu) Dixon PAES IV 59 No. 2           one source, its citation after
+     Samoa ibid. 19                           a head whose colon he dropped
+
+   All three are read *after* the colon scan and only where it left the text
+   alone, so nothing that already works can change.  What separates the first
+   two from a page reference ("… Grote I 189 (Zeus)") is that a name we already
+   know is in there or right there: Thompson writes "(Zeus)" and "(Pelops)"
+   after a page number, but "(Minos)" never sits beside "(Eskimo)". */
+var TAIL_PAREN = /\(([^()]{1,160})\)/g;
+/* a citation, not more prose: an author's name or Thompson's "ibid." */
+var CITES = /^\s+(?:ibid\.|[*\u2020]?[A-Z][a-z\u00c0-\u00ff]{2,})/;
+/* a name whose colon he dropped, straight after "ibid." */
+var HEAD_IBID = new RegExp(
+  '(?:^|[\\s;(\\[]|-{2,})(' + G_ALT + ')\\s+ibid\\.', 'g');
+/* a head whose colon he dropped, with the author printed after it --
+   "--Oceanic Dixon 47 n. 31 (Maori), …" (A1415).  No colon stands anywhere in
+   the unit, so the ordinary head rule cannot see it; the author and the page
+   that follow are what stand in for the colon. */
+var HEAD_AUTH = new RegExp(
+  '(?:^|[\\s;(\\[]|-{2,})(' + G_ALT + ')' +
+  '\\s+\\*{0,2}[A-Z][A-Za-z\\u00c0-\\u00ff\\.\'\\-]{1,24}' +
+  '(?:\\s+[A-Za-z][A-Za-z\\u00c0-\\u00ff\\.\'\\-]{0,24}){0,2}' +
+  '\\s+(?:[IVXLC]{1,7}\\b|\\d)', 'g');
+/* a head narrowed with "of" instead of brackets -- "Indians of Central
+   Brazil:", "Baining of New Britain:".  The colon is required: without it the
+   shape is indistinguishable from a title ("Catalogue of Romances …").  The
+   qualifier after "of" is one to four capitalised words -- "Central Brazil"
+   is two, and repeating "of X" (the first draft) matched only the one-word
+   ones, so both of the shapes this rule exists for went unmarked. */
+var HEAD_OF = new RegExp(
+  '(?:^|[\\s;(\\[]|-{2,})(' + G_ALT + ')' +
+  '\\s+of\\s+[A-Z][A-Za-z\\u00c0-\\u00ff\\.\'\\-]*' +
+  '(?:\\s+[A-Z][A-Za-z\\u00c0-\\u00ff\\.\'\\-]*){0,3}\\s*:', 'g');
+/* A colon-less head rule must not fire in the middle of a proper name.  In
+   "Arawak and Carib: Alexander Latin American 274" (A2250) the alternating
+   title shape "NAME Latin American 274" reads exactly like a head with its
+   author and page -- so "Latin" (a text mark in its own right) was cut out of
+   the title, and the title, whose span the mark then blocked, stopped
+   resolving.  A head glued to the tail of a preceding word across a single
+   space is mid-phrase; the real cases follow a boundary ("--Oceanic",
+   "; Oceanic", the start of the note, or a full stop). */
+function midPhrase(t, hs) {
+  return /\s/.test(t.charAt(hs - 1)) && /[A-Za-z]/.test(t.charAt(hs - 2));
+}
+/* The same shape prints an author's citation as readily as a source unit:
+   "Loomis White Magic 114", "Malone PMLA XLIII 404", "Saintyves Saints
+   Successeurs 245f." all read as head + title + page.  What tells them apart
+   is the dictionary -- an author's surname (often also harvested as a mark)
+   or his short title opens the phrase, and the mark would then cover the very
+   characters the key needs.  So: if a dictionary key leads the phrase, this is
+   a citation, not a head. */
+function dictLeads(phrase) {
+  var p = String(phrase).replace(/\*/g, '').replace(/\s+/g, ' ').replace(/^ | $/g, '');
+  while (p) {
+    if (DICT.has(p)) return true;
+    var sp = p.lastIndexOf(' ');
+    if (sp < 0) return false;
+    p = p.slice(0, sp);
+  }
+  return false;
+}
+/* And the word after the head has to look like an author, because an author
+   and his page are what stand in for the dropped colon.  A title reads the
+   same way -- "New York History XXIV 12", "Classical Philology XXXIX",
+   "Scandinavian Studies 45", "Hausa Superstitions and Customs 380ff." -- so
+   the mark went on a region word inside a journal's name and cost the note
+   its work chip.  A dictionary key among the first words settles it. */
+function authFollows(t, he) {
+  var words = t.slice(he).replace(/^\s*\*{0,2}/, '').split(/\s+/).slice(0, 5), hi = words.length, i, j;
+  /* the volume or the page ends the search: everything after it belongs to the
+     citation, not to the head's name */
+  for (i = 0; i < words.length; i++)
+    if (/^(?:[IVXLC]{1,7}$|\d)/.test(words[i])) { hi = i; break; }
+  /* any one- or two-word window of what stands between head and volume, so a
+     name the author writes "Cape Verde Islands. Parsons MAFLS XV" still
+     answers -- "Parsons" is the key, and "Islands" in front of it is part of
+     the head's own name, not of the author's */
+  for (i = 0; i < hi; i++) {
+    for (j = i; j < hi && j <= i + 1; j++) {
+      var p = words.slice(i, j + 1).join(' ');
+      if (DICT.has(p) || DICT.has(p.replace(/[.,;:]+$/, ''))) return true;
+    }
+  }
+  return false;
+}
+function groupSpans(cite) {
+  var out = [], heads = [];
+  if (!cite) return out;
+  /* does any mark already stand on these characters? */
+  function taken(s, e) {
+    for (var i = 0; i < out.length; i++) {
+      if (s < out[i].e && e > out[i].s) return true;
+    }
+    return false;
+  }
+  function add(name, s, e, from) {
+    if (!name || s < 0) return '';
+    name = tagCanon(name);          /* "Icel." counts as "Icelandic" */
+    var k = gkindOf(name);
+    if (k !== undefined && !GKIND.has(name)) {
+      /* the printed stop is not part of the mark's name, and the alias table
+         may want a longer name still ("Cook Is." -> "Cook Islands") */
+      var bare = tagCanon(name.replace(/\.$/, '')), kb = gkindOf(bare);
+      if (kb !== undefined) { name = bare; k = kb; }
+    }
+    if (k === undefined) {
+      /* the qualifier cannot be part of the name -- see strippedName() -- and
+         the span keeps covering the *printed* characters, so "Isthmian
+         tribes" marks the seven letters of "Isthmian". */
+      var cands = [strippedName(name), name.replace(/\s+[A-Z][a-z]{2,14}$/, '')];
+      for (var ci = 0; ci < cands.length; ci++) {
+        var c2 = cands[ci];
+        if (!c2 || c2 === name || c2.length < 3) continue;
+        var kc = gkindOf(tagCanon(c2));
+        if (kc === undefined) continue;
+        name = tagCanon(c2); k = kc; e = s + c2.length;
+        break;
+      }
+    }
+    if (k === undefined) return '';
+    /* The guard is on the *characters*, not on the name.  A note may print
+       the same mark twice -- A625.2 carries "…, Samoa, Union Group, Hawaii:
+       ibid. 35; Maori: Clark 13, 15, 171;", the second Maori long after the
+       unit that first named it, and A1415 closes on "Cf. Finnish" after its
+       Finnish unit -- and a guard on the name dropped every repetition but
+       the first: about 520 marks were lost that way.  What must not happen is
+       the same characters being drawn twice, which is what the head's own
+       bracketed list and the variant-list scan used to do, printing
+       "Society IsSociety Is." over one another. */
+    if (taken(s, e)) return '';
+    out.push({ s: s, e: e, n: name, k: k, head: from === name ? '' : from,
+               pos: GPOS[name] ? 1 : 0 });
+    return name;
+  }
+  /* the head in force at a position -- a list of variants is narrowed from
+     the region its own item belongs to ("American Indian: … (N. Pac. Coast,
+     Chinook, …)"), which is not the last head of the whole note */
+  function headAt(at) {
+    var best = '';
+    for (var i = 0; i < heads.length; i++) {
+      if (heads[i].at < at) best = heads[i].n; else break;
+    }
+    return best;
   }
   var m, last = '';
   GRP_RE.lastIndex = 0;
@@ -488,25 +904,146 @@ function groupSpans(cite) {
     var head = (m[1] || '').trim(), paren = m[3];
     if (!head && !paren) continue;
     if (head) last = head;
+    var headKey = head;
     if (head) {
-      var hs = m[0].indexOf(m[1]);
-      add(head, m.index + hs, m.index + hs + m[1].length, '');
+      var hs = m.index + m[0].indexOf(m[1]);
+      /* a head run ("England, U.S.:", "Hawaii, Marquesas, Lau Islands:")
+         names several marks -- one span each, when every name is in the
+         vocabulary; otherwise the whole run goes out as one */
+      var parts = headRunParts(head), whole = parts.length < 2;
+      if (whole) {
+        /* the resolved name, not the printed one, is what a following
+           bracketed qualifier is filed under: "Isthmian tribes (Panama):"
+           files Panama under "Isthmian", which is the mark the table has */
+        headKey = add(head, hs, hs + m[1].length, '') || head;
+      } else {
+        var off = 0;
+        for (var pj = 0; pj < parts.length; pj++) {
+          var p2 = parts[pj].replace(/^\s+|\s+$/g, '');
+          var at = head.indexOf(p2, off);
+          add(p2, hs + at, hs + at + p2.length, '');
+          off = at + p2.length;
+        }
+      }
+      heads.push({ at: m.index, n: headKey });
     }
     if (paren) {
       var base = m.index + m[0].indexOf(m[2]) + 1;
       var parts = paren.split(SUB_SPLIT), pos = 0;
       for (var i = 0; i < parts.length; i++) {
         var raw = parts[i], t = raw.replace(/^\s+|\s+$/g, '');
-        var at = paren.indexOf(raw, pos);
-        pos = at + raw.length;
+        var at2 = paren.indexOf(raw, pos);
+        pos = at2 + raw.length;
         if (!t) continue;
-        var name = subName(t);
+        var name = subPrinted(t);
         if (!name) continue;
-        var off = t.indexOf(name);
-        if (off < 0) off = 0;
-        add(name, base + at + off, base + at + off + name.length, head || last);
+        var off2 = t.indexOf(name);
+        if (off2 < 0) off2 = 0;
+        add(name, base + at2 + off2, base + at2 + off2 + name.length, headKey || last);
       }
     }
+  }
+  /* ---- a head whose colon Thompson dropped, its author printed after it ----
+     A1415 reads "…--Oceanic Dixon 47 n. 31 (Maori), 47 n. 34 (Polynesia--
+     general), 48 n. 35, 36 (Melanesia), …".  The unit opens on "Oceanic", the
+     author follows and then the page, and because no colon stands anywhere
+     between, the colon scan never sees the head: the bracketed names behind
+     it were filed under whatever head the *last* colon had set (A1415's
+     "Finnish"), which put eight Pacific and Melanesian names under a
+     Finno-Ugric source.  The scan runs before the bracketed-list scans so
+     those inherit the head it finds, and it stands down wherever a mark is
+     already on the characters. */
+  HEAD_AUTH.lastIndex = 0;
+  while ((m = HEAD_AUTH.exec(cite))) {
+    var hs3 = m.index + m[0].indexOf(m[1]);
+    if (taken(hs3, hs3 + m[1].length)) continue;
+    if (midPhrase(cite, hs3)) continue;
+    /* the phrase the match spans, its volume/page tail cut off: "Oceanic
+       Dixon n." -- a dictionary key at its front means a citation */
+    var ph = m[0].slice(m[0].indexOf(m[1]));
+    ph = ph.replace(/\s+(?:[IVXLC]{1,7}\b|\d)[\s\S]*$/, '');
+    if (dictLeads(ph)) continue;
+    if (!authFollows(cite, hs3 + m[1].length)) continue;
+    last = m[1];
+    heads.push({ at: m.index, n: m[1] });
+    add(m[1], hs3, hs3 + m[1].length, '');
+  }
+  /* This scan finds heads wherever they stand, so what it appended is out of
+     order, and headAt() walks the list from the front and stops at the first
+     entry past the position asked about -- without the sort the bracketed
+     names behind A1415's "Oceanic" still resolved to the *previous* colon's
+     head ("Finnish"). */
+  heads.sort(function (a, b) { return a.at - b.at; });
+  /* ---- a head narrowed with "of", not with brackets ----
+     "Indians of Central Brazil: Ehrenreich …" (A116) is one source unit: the
+     people, narrowed to where they live.  The head rule takes the longest name
+     it can reach before the colon, and that name is "Central Brazil" -- so the
+     *people* the entry is filed under went unmarked while the region got the
+     mark.  Bracketed qualifiers are already handled this way ("Africa
+     (Wachaga):"), and this is the same shape with "of" in place of the
+     brackets.  The colon is what keeps it off the titles ("Catalogue of
+     Romances …"), which are not heads at all. */
+  HEAD_OF.lastIndex = 0;
+  while ((m = HEAD_OF.exec(cite))) {
+    var hs4 = m.index + m[0].indexOf(m[1]);
+    if (taken(hs4, hs4 + m[1].length)) continue;
+    add(m[1], hs4, hs4 + m[1].length, '');
+  }
+  /* ---- a list of variants' own sources ----
+     "*Farrand-Frachtenberg JAFL XXVIII 216 (N. Pac. Coast, Chinook,
+     Kathlamet, Shoshone, Maidu, Coos, Alsea, Molala, Kalapuya);" names nine
+     of them, and the note's earlier colon never reaches here. */
+  TAIL_PAREN.lastIndex = 0;
+  while ((m = TAIL_PAREN.exec(cite))) {
+    var body = m[1];
+    if (/[\d()\[\]]/.test(body)) continue;
+    var bits = body.split(SUB_SPLIT), nms = [], any = false, ok = bits.length > 1;
+    for (var bi = 0; bi < bits.length; bi++) {
+      /* subName() first, so a well-shaped name the table happens not to have
+         still passes the shape gate; the vocabulary lookup picks up only the
+         ones subName() refuses to derive at all ("N. Pac. Coast Am. Indian",
+         five words, which used to fail the whole list with it). */
+      var nm = subName(bits[bi]) || subPrinted(bits[bi]);
+      nms.push(nm);
+      if (!nm) { ok = false; break; }
+      if (gkindOf(tagCanon(nm)) !== undefined) any = true;
+    }
+    if (!ok || !any) continue;
+    var s0 = m.index, bOff = 0, bHead = headAt(s0);
+    for (var bj = 0; bj < bits.length; bj++) {
+      var braw = bits[bj], bAt = body.indexOf(braw, bOff);
+      bOff = bAt + braw.length;
+      var bnm = nms[bj], bl = braw.indexOf(bnm);
+      if (bl < 0) bl = 0;
+      add(bnm, s0 + 1 + bAt + bl, s0 + 1 + bAt + bl + bnm.length, bHead);
+    }
+  }
+  /* ---- one source in brackets, its citation straight after ----
+     "(Maidu) Dixon PAES IV 59 No. 2", "(Tarascan) Alexander Lat. Am. 85".
+     A page reference never looks like this: "(Zeus)" follows a page number
+     and the name inside is one the vocabulary has never heard of. */
+  TAIL_PAREN.lastIndex = 0;
+  while ((m = TAIL_PAREN.exec(cite))) {
+    var body2 = m[1];
+    if (/[\d()\[\]]/.test(body2) || SUB_SPLIT.test(body2)) continue;
+    var nm2 = subName(body2) || subPrinted(body2);
+    if (!nm2 || gkindOf(tagCanon(nm2)) === undefined) continue;
+    if (!CITES.test(cite.slice(m.index + m[0].length))) continue;
+    var l = m.index - 1, lead = cite.slice(Math.max(0, l - 6), l + 1);
+    if (/\d\s*$/.test(lead)) continue;      /* a page number in front of it */
+    var no = body2.indexOf(nm2);
+    add(nm2, m.index + 1 + (no < 0 ? 0 : no),
+        m.index + 1 + (no < 0 ? 0 : no) + nm2.length, headAt(m.index));
+  }
+  /* ---- a head whose colon Thompson dropped ----
+     A287 prints "Hawaii: Beckwith Myth 97; Samoa ibid. 19; Easter Is.: …",
+     and the missing colon cost Samoa its mark, its back-link and its row on
+     the tags page. */
+  HEAD_IBID.lastIndex = 0;
+  while ((m = HEAD_IBID.exec(cite))) {
+    var hs2 = m.index + m[0].indexOf(m[1]);
+    if (midPhrase(cite, hs2)) continue;
+    add(m[1], hs2, hs2 + m[1].length, '');
   }
   out.sort(function (a, b) { return a.s - b.s; });
   return out;
@@ -517,7 +1054,9 @@ function groupsOf(cite) {
 
 /* Tags of one entry, laid out by kind.  A tag Thompson narrowed to a paren
    qualifier keeps the region it was narrowed from, so "Wachaga" is shown as
-   "Africa › Wachaga" rather than as a floating name. */
+   "Africa › Wachaga" rather than as a floating name.  A tag that only a list
+   of variants vouches for ("(Eskimo, Cherokee, Mandan, ...)") is marked as
+   possible: it keeps its place but says so. */
 function groupRowHTML(tags) {
   var by = { geo: [], people: [], text: [] };
   tags.forEach(function (g) { (by[g.k] || (by[g.k] = [])).push(g); });
@@ -528,10 +1067,11 @@ function groupRowHTML(tags) {
     if (!list || !list.length) return;
     h += '<div class="grow"><span class="glabel k-' + k + '">' + KINDLABEL[k] + '</span>' +
       '<span class="tagrow">' + list.map(function (g) {
-        return '<span class="tag k-' + g.k + '" data-reg="' + esc(g.n) + '" title="' +
-          esc(KINDLABEL[g.k] + (g.head ? '（' + g.head + ' 之下）' : '')) + '">' +
+        return '<span class="tag k-' + g.k + (g.pos ? ' poss' : '') + '" data-reg="' + esc(g.n) + '" title="' +
+          esc(KINDLABEL[g.k] + (g.head ? '（' + g.head + ' 之下）' : '') +
+              (g.pos ? ' · 可能：语料中仅此一见，未收入切分词表' : '')) + '">' +
           (g.head ? '<span class="gparent">' + esc(g.head) + ' › </span>' : '') +
-          esc(g.n) + '</span>';
+          esc(g.n) + (g.pos ? '<span class="q">?</span>' : '') + '</span>';
       }).join('') + '</span></div>';
   });
   return h + '</div>';
@@ -672,25 +1212,19 @@ function runSearch(q) {
 
 /* the advanced query runs through the same result pipeline -- only the
    matcher differs, and it can fail to parse, which the UI shows where the
-   results would have been */
-var advCache = { q: null, rows: null, capped: false, err: null };
+   results would have been.  A "| sort: ..." pipe orders the surviving rows
+   before the cap, so the cap keeps the first rows of the *ordered* list. */
+var advCache = { q: null, rows: null, capped: false, err: null, sort: null };
 function runAdvSearch(q) {
   if (advCache.q === q) return advCache.rows;
-  advCache = { q: q, rows: [], capped: false, err: null };
-  var ast;
-  try {
-    ast = advParse(q);
-  } catch (e) {
-    advCache.err = e;
-    return advCache.rows;
-  }
-  var hit = advEval(ast);
-  for (var i = 0; i < N; i++) {
-    if (!hit[i]) continue;
-    advCache.rows.push(i);
-    if (advCache.rows.length >= MAX_RES) { advCache.capped = true; break; }
-  }
-  return advCache.rows;
+  advCache = { q: q, rows: [], capped: false, err: null, sort: null };
+  var r = advRun(q);
+  if (r.err) { advCache.err = r.err; return advCache.rows; }
+  advCache.sort = r.sort;
+  var rows = r.rows;
+  if (rows.length > MAX_RES) { rows.length = MAX_RES; advCache.capped = true; }
+  advCache.rows = rows;
+  return rows;
 }
 /* which of the two matchers runs is a property of the mode, so flatten() and
    the pane both go through here */
@@ -711,17 +1245,22 @@ function runQuery(q) {
        (ref: *Types or region: Oceanic or body: /sun|moon/i)
 
    selects the entries that sit inside the subtree rooted at A1, deeper than
-   the section level (so group members), which either cite something looking
-   like *Types, or carry a source tag under Oceanic, or whose description
-   matches the pattern.  A clause is `field: value`; the value is
+   the section level (so group members), which either cite a variant-list work
+   (the printed "*Types"), or carry a source tag under Oceanic, or whose
+   description matches the pattern.  A clause is `field: value`; the value is
 
-     word          a case-insensitive substring        body: basuto
+     word          a case-insensitive substring        ref: Types
      word*         a glob, anchored at both ends       label: A1*
-     "two words"   a literal substring, spaces kept    ref: "Kidd 51ff"
+     *word         the printed star, kept literal      ref: *Types
+     "two words"   a literal substring, spaces kept    ref: "No. 1."
      /re/flags     a JavaScript regular expression     head: /king|queen/i
 
-   and the ordered fields accept a comparison before the value
-   (`depth: >=group`, `page: <100`).  The fields:
+   A star that opens a value is the book's own mark -- Thompson's variant-list
+   star -- and stays literal; a star anywhere else is the wildcard.  A regex
+   keeps the flags it was written with: without /i it is case-sensitive.  The
+   ordered fields accept a comparison before the value (`depth: >=group`,
+   `page: <100`), and a trailing `| sort: [reverse] <key>` orders the result
+   (`then: <key>` breaks ties).  The fields:
 
      label   the motif number itself (a bare word matches exactly, A1 is not A10)
      within  the subtree selected by another query -- `within: A1` is sugar for
@@ -736,6 +1275,9 @@ function runQuery(q) {
      star    1 = cites at least one * work, 2 = at least one **, 3 = both
      has     cite | name | group | xref | dup -- the entry carries one
      page    the PDF page the entry is printed on
+     filter  checked -- only the entries the reader has ticked.  The ticks
+             live in the local layer, so the published copy answers this with
+             nothing (the evaluator finds no local layer and answers empty)
 
    The parser is a plain recursive descent over a token string -- no eval, so
    a bad query raises a positioned error the UI can point at, not a SyntaxError. */
@@ -743,16 +1285,20 @@ function runQuery(q) {
 var ADV_EXAMPLE = 'within: (label A1) and depth: >=group and ' +
   '(ref: *Types or region: Oceanic or body: /sun|moon/i)';
 var ADV_FIELDS = { label: 1, within: 1, depth: 1, body: 1, head: 1,
-  ref: 1, region: 1, star: 1, has: 1, page: 1 };
+  ref: 1, region: 1, star: 1, has: 1, page: 1, filter: 1 };
+var ADV_SORT_KEYS = { 'body-length': 1, 'head-length': 1, 'label': 1,
+  'confidence': 1, 'subentry-number': 1 };
 var ADV_NUMFIELDS = { depth: 1, star: 1, page: 1 };
 var ADV_DEPTHWORD = { section: 1, division: 1, group: 2 };
+var ADV_FILTER = { checked: 1 };
+var ADV_HAS = { cite: 1, name: 1, group: 1, xref: 1, dup: 1 };
 
 function advLex(s) {
   var toks = [], i = 0, n = s.length;
   while (i < n) {
     var c = s.charAt(i);
     if (/\s/.test(c)) { i++; continue; }
-    if (c === '(' || c === ')') { toks.push({ t: c, at: i }); i++; continue; }
+    if (c === '(' || c === ')' || c === '|') { toks.push({ t: c, at: i }); i++; continue; }
     if (c === '"') {
       var j = s.indexOf('"', i + 1);
       if (j < 0) throw { at: i, msg: '引号没有闭合' };
@@ -830,6 +1376,11 @@ function advParse(q) {
     }
     var v = toks[pos++];
     if (v.t !== 'v') throw { at: v.at, msg: '“' + field + ':” 后面要跟一个值' };
+    if (op && !ADV_NUMFIELDS[field]) {
+      /* only depth, star and page are ordered; "body: >sun" is a typo, not a
+         clause that quietly means "body: sun" */
+      throw { at: f.at, msg: '“' + field + '” 不支持比较符 ' + op };
+    }
     if (ADV_NUMFIELDS[field]) {
       if (v.kind === 're') throw { at: v.at, msg: '“' + field + '” 不接受正则' };
       if (op && op !== '=' && op !== '>=' && op !== '>' && op !== '<=' && op !== '<' && op !== '!=')
@@ -847,6 +1398,24 @@ function advParse(q) {
       var nv = parseFloat(v.v);
       if (isNaN(nv)) throw { at: v.at, msg: '“' + field + '” 要一个数字' };
       return { t: 'clause', f: field, op: op || '=', n: nv };
+    }
+    if (field === 'has') {
+      /* the value names one thing an entry can carry; a typo used to match
+         nothing at all rather than say so */
+      if (v.kind === 're') throw { at: v.at, msg: '“has” 不接受正则' };
+      var what = String(v.v).toLowerCase();
+      if (!ADV_HAS[what]) throw { at: v.at, msg: 'has 取 cite、name、group、xref 或 dup' };
+      return { t: 'clause', f: field, op: null, v: v };
+    }
+    if (field === 'filter') {
+      /* filter: checked -- the reader's ticks. Unlike every other field this
+         one has no meaning on the published copy (nobody ticked anything
+         there), so advEvalNode answers it with the empty set instead of
+         erroring when the local layer is absent. */
+      if (v.kind === 're') throw { at: v.at, msg: '“filter” 不接受正则' };
+      var sel = String(v.v).toLowerCase();
+      if (!ADV_FILTER[sel]) throw { at: v.at, msg: 'filter 取 checked' };
+      return { t: 'clause', f: field, op: null, v: v };
     }
     return { t: 'clause', f: field, op: null, v: v };
   }
@@ -866,14 +1435,47 @@ function advParse(q) {
     throw { at: f.at, msg: 'within: 后面要跟 (条件) 或一个编号' };
   }
   var out = parseExpr();
+  var sort = null;
+  /* pipe stage: "<filter> | sort: [reverse] key [then: [reverse] key]" --
+     keys are entry metadata, "then" breaks ties, "reverse" flips one key */
+  if (peek() && peek().t === '|') {
+    pos++;
+    var sk = peek();
+    if (!sk || sk.t !== 'v' || sk.v.toLowerCase() !== 'sort')
+      throw { at: sk ? sk.at : 0, msg: '管道后目前只支持 sort' };
+    pos++;
+    if (peek() && peek().t === ':') pos++;
+    sort = [];
+    for (;;) {
+      var rev = false;
+      if (peek() && peek().t === 'v' && peek().v.toLowerCase() === 'reverse') { rev = true; pos++; }
+      var kt = peek();
+      if (!kt || kt.t !== 'v') throw { at: kt ? kt.at : 0, msg: 'sort 后面要跟排序键（body-length、confidence 等）' };
+      var key = kt.v.toLowerCase();
+      pos++;
+      if (!ADV_SORT_KEYS[key]) throw { at: kt.at, msg: '不认识的排序键 “' + kt.v + '”' };
+      if (peek() && peek().t === ':') pos++;          /* optional colon after a key */
+      sort.push({ key: key, rev: rev });
+      if (peek() && peek().t === 'v' && peek().v.toLowerCase() === 'then') { pos++; if (peek() && peek().t === ':') pos++; continue; }
+      break;
+    }
+  }
   if (peek()) throw { at: peek().at, msg: '这里多了条件：从 “' + (peek().v || peek().t) + '” 起读不通' };
+  out.sort = sort;
   return out;
 }
 
 /* ---- values ---- */
 function advReOf(v) {
   if (v.kind !== 're') return null;
-  var re = new RegExp(v.re, /[i]/.test(v.fl) ? v.fl : v.fl + 'i');
+  /* honour the flags the query wrote: without an "i" a regex stays
+     case-sensitive, exactly as a JavaScript one would -- every documented
+     example spells the /i/ out, so silently forcing it made "/King/" and
+     "/king/" the same query and turned "/[A-Z]{4}/" case-insensitive.  The
+     global and sticky flags are dropped: the matcher is one shared RegExp and
+     .test on a /g/ one advances lastIndex, so an entry would answer
+     differently the second time it was visited. */
+  var re = new RegExp(v.re, String(v.fl || '').replace(/[gy]/g, ''));
   return function (t) { return re.test(String(t)); };   /* a RegExp is not callable */
 }
 /* text fields: word = substring, word* = anchored glob, "…" = literal, /…/ = regex */
@@ -881,12 +1483,25 @@ function advTextOf(v) {
   var re = advReOf(v);
   if (re) return re;
   if (v.kind === 'str') { var s = v.v.toLowerCase(); return function (t) { return String(t).toLowerCase().indexOf(s) >= 0; }; }
-  if (v.v.indexOf('*') >= 0) {
-    var g = new RegExp('^' + v.v.split('*').map(rx).join('.*') + '$', 'i');
+  var w = v.v;
+  /* A star that opens the value is the book's own mark, not a wildcard.
+     Thompson prints "*Types" and "*Köhler" for the variant-list works, so
+     `ref: *Types` has to find the star-marked key; read as a glob the leading
+     star made the value mean "ends with Types" and matched nothing at all
+     (371 entries do carry a "*Types" citation).  A star anywhere else stays
+     the anchored glob it has always been (`label: A1*`). */
+  var lead = w.charAt(0) === '*' ? '\\*' : '';
+  var rest = lead ? w.slice(1) : w;
+  if (rest.indexOf('*') >= 0) {
+    var g = new RegExp('^' + lead + rest.split('*').map(rx).join('.*') + '$', 'i');
     return function (t) { return g.test(t); };
   }
-  var w = v.v.toLowerCase();
-  return function (t) { return String(t).toLowerCase().indexOf(w) >= 0; };
+  if (lead) {
+    var gl = new RegExp(lead + rx(rest), 'i');
+    return function (t) { return gl.test(String(t)); };
+  }
+  var wl = w.toLowerCase();
+  return function (t) { return String(t).toLowerCase().indexOf(wl) >= 0; };
 }
 /* the label field: a bare word is exact, so label: A1 does not catch A10 */
 function advLabelOf(v) {
@@ -938,9 +1553,12 @@ function advRegKey(w) {
 function advRegionHits(v) {
   var out = [], i;
   if (v.kind === 're') {
+    /* advReOf hands back the *predicate*, not the RegExp -- call it, do not
+       reach for .test on it (that read `undefined is not a function` and the
+       whole `region: /…/ ` form failed silently in advRun's catch) */
     var re = advReOf(v);
-    postReg.forEach(function (a, k) { if (re.test(k)) out.push.apply(out, a); });
-    postRegHead.forEach(function (a, k) { if (re.test(k)) out.push.apply(out, a); });
+    postReg.forEach(function (a, k) { if (re(k)) out.push.apply(out, a); });
+    postRegHead.forEach(function (a, k) { if (re(k)) out.push.apply(out, a); });
     return out;
   }
   if (v.v.indexOf('*') >= 0) {
@@ -1045,9 +1663,20 @@ function advEvalNode(nd, hit) {
         what === 'cite' ? !!m2[5] :
         what === 'name' ? !!m2[6] :
         what === 'group' ? grpOf[i] >= 0 :
-        what === 'xref' ? m2[4].indexOf('\u2020') >= 0 :
+        what === 'xref' ? ((m2[4] || '').indexOf('\u2020') >= 0 ||
+                           (m2[5] || '').indexOf('\u2020') >= 0) :
         what === 'dup' ? !!DUPS[m2[0]] : false;
       if (yes) hit[i] = 1;
+    }
+    return;
+  }
+  if (f === 'filter') {
+    /* filter: checked -- the reader's ticks, which only exist with the local
+       layer loaded.  The published copy has that layer stripped at publish
+       time, so the clause answers with the empty set instead of throwing a
+       ReferenceError on a name that is not there. */
+    if (String(v.v).toLowerCase() === 'checked' && typeof isChecked === 'function') {
+      for (i = 0; i < N; i++) if (isChecked(i)) hit[i] = 1;
     }
     return;
   }
@@ -1073,12 +1702,74 @@ function advNeedsIndex(nd) {
    and the tests call directly */
 function advRun(q) {
   try {
-    var hit = advEval(advParse(q)), out = [];
+    var ast = advParse(q);
+    /* a region clause reads the citation reverse index.  The UI builds it
+       ahead of the call (with a toast), but the bare API has to stand on its
+       own -- tests and console use reach advRun directly, and an unbuilt index
+       used to throw in here and surface as an error with no message. */
+    if (advNeedsIndex(ast) && !idxReady) buildReverseIndex();
+    var hit = advEval(ast), out = [];
     for (var i = 0; i < N; i++) if (hit[i]) out.push(i);
-    return { rows: out, err: null };
+    if (ast.sort) out = sortRows(out, ast.sort);
+    return { rows: out, err: null, sort: ast.sort || null };
   } catch (e) {
-    return { rows: [], err: e };
+    return { rows: [], err: e, sort: null };
   }
+}
+/* the pipe stage, spelled out for the results header ("排序：注记长 ↓") */
+var ADV_SORT_LABEL = {
+  'body-length': '注记长度', 'head-length': '词头长度', 'label': '编号',
+  'confidence': '解析自信度', 'subentry-number': '子母题数'
+};
+function sortLabel(specs) {
+  return specs.map(function (s) {
+    return (ADV_SORT_LABEL[s.key] || s.key) + (s.rev ? ' ↓' : ' ↑');
+  }).join(' › ');
+}
+/* pipe stage: order the matched entries by entry metadata.
+   "label" compares motif numbers naturally (A9 before A10, A100.2 after
+   A100.1); the numeric keys compare as numbers; "reverse" flips one key.
+
+   Every row's keys are derived once, before the sort, instead of inside the
+   comparator.  A comparator is asked for its key about 2·n·log n times --
+   over a million for the whole index -- and two of these keys are not free:
+   "confidence" in local mode goes through entryConf(), which reads the
+   entry's entire note, and "label" builds a padded string with a regex.
+   Deriving them once is what makes `sort: confidence` over the whole corpus
+   finish instead of grinding for a minute and a half. */
+function natLabel(s) {
+  return String(s).replace(/\d+/g, function (d) {
+    return '00000'.slice(d.length - 1) + d;
+  });
+}
+function sortKeyOf(j, key) {
+  if (key === 'label') return natLabel(MO[j][0]);
+  if (key === 'body-length') return (MO[j][4] || '').length;
+  if (key === 'head-length') return (MO[j][6] || '').length;
+  if (key === 'confidence')
+    return typeof entryConf === 'function' ? entryConf(j) : (D.conf && D.conf[j]) || 0;
+  if (key === 'subentry-number') return kidM[j];
+  return 0;
+}
+function sortRows(rows, specs) {
+  var n = rows.length, m = specs.length, i, s;
+  var keys = new Array(n);
+  for (i = 0; i < n; i++) {
+    var k = new Array(m);
+    for (s = 0; s < m; s++) k[s] = sortKeyOf(rows[i], specs[s].key);
+    keys[i] = k;
+  }
+  var order = new Array(n);
+  for (i = 0; i < n; i++) order[i] = i;
+  order.sort(function (x, y) {
+    var a = keys[x], b = keys[y];
+    for (var t = 0; t < m; t++) {
+      var r = a[t] < b[t] ? -1 : a[t] > b[t] ? 1 : 0;
+      if (r) return specs[t].rev ? -r : r;
+    }
+    return x - y;               /* ties keep the printed order */
+  });
+  return order.map(function (x) { return rows[x]; });
 }
 
 /* ============================ tree flattening ============================ */
@@ -1159,6 +1850,17 @@ function renderList(force) {
      browser's own bottom UI would otherwise cover it */
   var total = rows.length * ROWH + (rows.length ? 90 : 0);
   spacer.style.height = total + 'px';
+  /* The content just changed height, and the offset has to follow it before it
+     is used.  A browser clamps a too-large scrollTop once the content shrinks
+     beneath it, but only after layout -- and this runs before it, so for one
+     frame the window is computed from an offset that no longer exists.  A query
+     returning ten rows after one that returned twenty thousand drew a blank
+     sidebar while the note pane listed the matches (start landed past the end,
+     so the row loop emitted nothing and the pane stayed empty until the scroll
+     event arrived).  Clamp first, then window: "where the reader is" and "where
+     the reader can be" agree by the time either is used. */
+  var maxTop = Math.max(0, total - scroller.clientHeight);
+  if (scroller.scrollTop > maxTop) scroller.scrollTop = maxTop;
   var st = scroller.scrollTop, vh = scroller.clientHeight;
   var start = Math.max(0, Math.floor(st / ROWH) - BUF);
   var end = Math.min(rows.length, Math.ceil((st + vh) / ROWH) + BUF);
@@ -1178,7 +1880,10 @@ function renderList(force) {
   var tc = document.getElementById('treecount');
   if (tc) tc.textContent = rows.length.toLocaleString() + ' 行';
   var tl = document.getElementById('treelabel');
-  if (tl) tl.textContent = state.q ? '检索结果' : '分类树';
+  if (tl) {
+    tl.textContent = !state.q ? '分类树'
+      : (state.adv && advCache.sort ? '检索结果 · 排序：' + sortLabel(advCache.sort) : '检索结果');
+  }
 }
 function shortDesc(i, max) {
   var t = MO[i][4] || '';
@@ -1210,6 +1915,27 @@ function rowText(i) {
     t += '<span class="rest">' + esc(tail) + '</span>';
   }
   return t;
+}
+/* A `sort:` pipe turns the list into a review queue, so each row carries the
+   value it was ordered by -- the same number sortKeyOf() compared, and in local
+   mode the runtime one.  Any key, not only confidence: reading "8" beside rows
+   sorted by note length is the whole point of sorting by it.  The first key the
+   row does not already show wins; "label" is always skipped, because that is
+   the motif number printed at the left of the row.  Both lists use this, so the
+   sidebar and the 匹配条目 column agree digit for digit. */
+function rowKeyHTML(j) {
+  var specs = state.q && state.adv && advCache.sort;
+  if (!specs) return '';
+  for (var s = 0; s < specs.length; s++) {
+    var key = specs[s].key;
+    if (key === 'label') continue;
+    var v = sortKeyOf(j, key);
+    if (v === undefined || v === null) continue;
+    var txt = key === 'confidence' ? Number(v).toFixed(2) : String(v);
+    return '<span class="rc" title="排序键：' + esc(ADV_SORT_LABEL[key] || key) + '">' +
+      esc(txt) + '</span>';
+  }
+  return '';
 }
 function rowHTML(r, idx) {
   var pad = 6 + r.d * 13;
@@ -1251,6 +1977,7 @@ function rowHTML(r, idx) {
   var tw = !state.q
     ? '<span class="tw' + (kids ? (open ? ' open' : '') : ' leaf') + '"' + (kids ? ' data-tog="m' + r.x + '"' : '') + '>▶</span>'
     : '';
+  var rc = rowKeyHTML(r.x);
   return '<div class="row k-mo' + (state.sel === r.x ? ' sel' : '') + '" data-i="' + idx +
     '" style="padding-left:' + pad + 'px">' +
     tw +
@@ -1258,7 +1985,7 @@ function rowHTML(r, idx) {
     '<span class="nm">' + rowText(r.x) + '</span>' +
     (DUPS[num] ? '<span class="dup" title="原书把编号 ' + esc(num) +
       ' 印了 ' + DUPS[num].length + ' 次（编号重复）">\u00d7' + DUPS[num].length + '</span>' : '') +
-    (m[5] ? '' : '') +
+    rc +
     (kids ? '<span class="cnt">' + (mDesc[r.x] > 0 ? '+' + mDesc[r.x] : '') + '</span>' : '') +
     '</div>';
 }
@@ -1315,6 +2042,67 @@ function goTo(num, keepView) {
 }
 /* a click on one of the rows listed in the right-hand results pane */
 function pickResult(i) { return selectMotif(i, true, true); }
+
+/* Where ↑/↓ take you.
+ *
+ * With a search active the reader is reading a *list*, and that list has an
+ * order of its own -- possibly one the sort pipe just chose.  Stepping by the
+ * book's printed order inside a ranked result list ignores the ranking the
+ * reader asked for, and it feels broken: "next" lands on something the list
+ * does not even contain.  So while a query is live, the step walks the result
+ * list.
+ *
+ * Two fallbacks keep it honest: with no query it is the printed order (below),
+ * and if the current entry is not in the list at all -- it was reached by a
+ * cross-reference hop, or the list was truncated at MAX_RES -- the printed
+ * order takes over again rather than pretending there is a neighbour. */
+function stepList() {
+  var r = state.q ? state.results : null;
+  return (r && r.length) ? r : null;
+}
+/* A live query is not by itself enough: an entry reached by a cross-reference
+   hop, or one the MAX_RES cap dropped from the list, has no neighbours in it
+   to step to -- so it is stepped by the printed order instead, and the buttons
+   must say so. */
+function stepInList(i) {
+  var r = stepList();
+  return !!r && r.indexOf(i) >= 0;
+}
+function stepTarget(i, dir) {
+  if (stepInList(i)) {
+    var r = stepList(), p = r.indexOf(i), q = p + dir;
+    return (q >= 0 && q < r.length) ? r[q] : -1;
+  }
+  var j = i + dir;
+  return (j < 0 || j >= N) ? -1 : j;
+}
+/* the step buttons' tooltip has to name what it steps through, because that
+   changes with the search state (and the button is only an arrow, so the
+   tooltip is the only place the difference can be stated) */
+function stepHint(dir, i) {
+  return (dir < 0 ? '上一条' : '下一条') + ' · ' +
+    (stepInList(i) ? '搜索结果' : '全书顺序') + '（Alt+' + (dir < 0 ? '↑' : '↓') + '）';
+}
+/* 上一条 / 下一条, printed order: the order the entries were printed in, which
+   is the order they sit in MO.  The line after a parent is its first
+   subentry, so stepping descends into the children instead of jumping to the
+   next sibling and losing the whole subtree; and a number the book prints
+   twice is visited at both places, because the step is by printed line rather
+   than by number (resolving a sibling's *number* through byNum always lands
+   on the first printing, which is how the ×2 rows used to be skipped). */
+function stepEntry(dir) {
+  var i = state.sel;
+  if (i < 0) return false;
+  var j = stepTarget(i, dir);
+  if (j < 0) {
+    var inList = stepInList(i);
+    toast(dir > 0
+      ? (inList ? '已经是搜索结果里的最后一条' : '已经是最后一条')
+      : (inList ? '已经是搜索结果里的第一条' : '已经是第一条'));
+    return false;
+  }
+  return selectMotif(j, true, true);
+}
 
 /* ============================ history ============================
    The hash is the single source of truth for "what am I looking at" --
@@ -1399,12 +2187,18 @@ function onPop(ev) {
   curLabel = navLabel();
   syncNav();
 }
-/* the strip shown wherever the current page was reached by navigating */
+/* the strip shown wherever the current page was reached by navigating.
+   Always rendered -- even on a freshly opened page, where it is disabled and
+   grey -- so the top of the pane keeps one height instead of appearing and
+   disappearing with the history.  The label is clipped by CSS (`.blab`), so a
+   long page name ellipsises instead of stretching the strip. */
 function navBackBtn() {
   var prev = (history.state && history.state.prev) || '';
-  if (HI <= 0) return '';
-  return '<button class="btn" data-act="navback">← 返回' +
-    (prev ? '「' + esc(prev) + '」' : '') + '</button>';
+  var can = HI > 0;
+  var label = can ? '← 返回' + (prev ? '「' + esc(prev) + '」' : '') : '← 返回';
+  return '<button class="btn back" data-act="navback"' + (can ? '' : ' disabled') +
+    ' title="' + (can ? (prev ? '返回「' + esc(prev) + '」' : '返回上一页') : '没有可返回的页面') + '">' +
+    '<span class="blab">' + label + '</span></button>';
 }
 function hashParams() {
   var raw = decodeURIComponent(location.hash || '').replace(/^#/, ''), out = {};
@@ -1416,15 +2210,36 @@ function hashParams() {
 }
 
 /* ============================ detail pane ============================ */
-function renderDesc(i) {
-  return xrefHTML(MO[i][4] || '');
+/* Thompson ties a note to a description with a dagger and a digit -- "Origin
+   of spider.†1" (A2091), "Other helpful animals.†2" (B490) -- and prints the
+   notes themselves in an apparatus at the back of the volume, each under a
+   header that says where it belongs in the edition ("A2091. Vol. 1 Fn. 1 p.
+   262").  Fifteen notes are printed; the nine headed "Motif: Introduction"
+   belong to the front matter this index does not carry, so six find a mark
+   here.  A mark whose note is not in the scan keeps the printed dagger and
+   says so, rather than looking like a mark that lost its note. */
+var RE_FNMARK = /\u2020\s?(\d)/g;
+function fnHTML(t, num) {
+  var notes = [], out = t.replace(RE_FNMARK, function (mm, d) {
+    var n = FN[num + ':' + d];
+    if (!n) return '<span class="fnmark none" title="原书此注未收入本次扫描">' + mm + '</span>';
+    notes.push(n);
+    return '<span class="fnmark" title="Vol. ' + n[1] + ' Fn. ' + n[0] +
+      ' p. ' + n[2] + '">' + mm + '</span>';
+  });
+  for (var i = 0; i < notes.length; i++) {
+    var n = notes[i];
+    out += '<div class="fnnote"><span class="fnlab">原注 · Vol. ' + n[1] +
+      ' Fn. ' + n[0] + ' p. ' + n[2] + '</span>' +
+      xrefHTML(n[3]).replace(/\n/g, '<br>') + '</div>';
+  }
+  return out;
 }
-/* A cross-reference is either one motif (†F531) or a stretch of the index
-   (†G100--199, †G500-- 699, †G400--†G599).  The second form addresses a
-   *division*, so it has to resolve to the division page -- reading it as the
-   motif whose number happens to start the range (G100) loses the whole point
-   of the reference. */
-var RE_XREF = /\u2020\s?([A-Z])(\d+(?:\.\d+)*)\s*(?:([-\u2013\u2014]{1,2})\s*(?:([A-Z])\s?)?(\d+(?:\.\d+)*))?(ff|f)?/g;
+function renderDesc(i) {
+  return fnHTML(xrefHTML(MO[i][4] || ''), MO[i][0]);
+}
+/* RE_XREF (25-keys.js) and the rule that makes a range address its division
+   rather than the motif that starts it. */
 function cmpNum(a, b) {
   var x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
   for (var i = 0, n = Math.max(x.length, y.length); i < n; i++) {
@@ -1440,6 +2255,21 @@ function xrefOne(m, ch, num, dash, ch2, hi, suf) {
   if (dash && hi && cmpNum(num, hi) < 0) {
     var di = divOfRange(ch, num, hi, ch2);
     if (di >= 0) {
+      /* a range that opens at a group head and reaches past it addresses
+         that group, not just the section */
+      var gs = grpByDiv[di] || [], gi, g, headTop, lastTop;
+      for (gi = 0; gi < gs.length; gi++) {
+        g = gs[gi];
+        var hmi = grpHeadMotif(g);
+        headTop = parts(MO[hmi][0])[0];
+        var mem = grpMembers(g);
+        lastTop = mem.length ? parts(MO[mem[mem.length - 1]][0])[0] : -1;
+        if (headTop === Number(num) && lastTop >= Number(hi)) {
+          var glab = rangeLabel(ch, num, ch2, hi) + ' · ' + GRP[g][2];
+          return '<span class="xref xr" data-gog="' + g + '" title="跳转到组 ' +
+            esc(GRP[g][2]) + '">' + glab + '</span>';
+        }
+      }
       var lab = rangeLabel(ch, num, ch2, hi);
       return '<span class="xref xr" data-god="' + di + '" title="跳转到分类 ' + lab + '">' + lab + '</span>';
     }
@@ -1451,6 +2281,13 @@ function xrefOne(m, ch, num, dash, ch2, hi, suf) {
 function xrefHTML(t) {
   return esc(t).replace(RE_XREF, xrefOne);
 }
+/* the same decoration for slices of a longer string: the † reference gets
+   its chip (dangling targets included), the surrounding text is escaped */
+function xesc(s) {
+  return esc(s).replace(RE_XREF, function (mm, ch, num, dash, ch2, hi, suf) {
+    return xrefOne(null, ch, num, dash, ch2, hi, suf);
+  });
+}
 /* the same scan, but as a de-duplicated list for the "cross references" block */
 function xrefList(t) {
   var out = [], seen = Object.create(null);
@@ -1458,7 +2295,20 @@ function xrefList(t) {
     var item = null, key;
     if (dash && hi && cmpNum(num, hi) < 0) {
       var di = divOfRange(ch, num, hi, ch2);
-      if (di >= 0) { key = 'd' + di; item = { k: 'd', i: di, lab: rangeLabel(ch, num, ch2, hi) }; }
+      if (di >= 0) {
+        /* prefer a group whose head opens the range */
+        var gog = -1, gs = grpByDiv[di] || [];
+        for (var gi = 0; gi < gs.length; gi++) {
+          var g = gs[gi];
+          if (parts(MO[grpHeadMotif(g)][0])[0] === Number(num)) {
+            var mem = grpMembers(g);
+            if (mem.length && parts(MO[mem[mem.length - 1]][0])[0] >= Number(hi)) gog = g;
+            break;
+          }
+        }
+        if (gog >= 0) { key = 'g' + gog; item = { k: 'g', i: gog, lab: rangeLabel(ch, num, ch2, hi) }; }
+        else { key = 'd' + di; item = { k: 'd', i: di, lab: rangeLabel(ch, num, ch2, hi) }; }
+      }
     }
     if (!item) { key = 'm' + ch + num; item = { k: 'm', n: ch + num }; }
     if (!seen[key]) { seen[key] = 1; out.push(item); }
@@ -1466,31 +2316,135 @@ function xrefList(t) {
   });
   return out;
 }
-/* the note's two separator levels: ";" separates the items of one segment,
-   "--" opens a new segment (a new region, a different kind of research) --
-   never confused with a page range like 144--154, which sits inside an item
-   (a range never follows a full stop or stands between spaces the way the
-   separator does).  Returns unit ranges, trimmed of the separators. */
+/* the block lists everything the entry points at, so it reads the note as well
+   as the description: a reference written into the bibliography ("A901 … --Cf.
+   †A911, †A920.1.2, …") is no less a cross-reference than one in the prose, and
+   412 entries carry their daggers only there.  The description comes first, so
+   a reference that appears in both keeps the position the reader meets first. */
+function xrefAll(m) {
+  var out = [], seen = Object.create(null);
+  [m[4], m[5]].forEach(function (t) {
+    xrefList(t).forEach(function (x) {
+      var key = (x.k === 'd' || x.k === 'g') ? x.k + x.i : 'm' + x.n;
+      if (!seen[key]) { seen[key] = 1; out.push(x); }
+    });
+  });
+  return out;
+}
+/* the character before the dash that is not whitespace -- "… shoulder.” --
+   Parson:" must not be read as a separator, and the closing quote sits one
+   space back from the dash. */
+function nonSpaceBefore(t, i) {
+  for (var k = i - 1; k >= 0; k--) if (!/\s/.test(t.charAt(k))) return t.charAt(k);
+  return '';
+}
+/* The dash in "… 256ff.,--Society Is.: Dixon" opens a new segment, but the
+   one in "Zs. f. Vksk. XXXIII--XXXIV 78" is a page range: both put a letter
+   or a digit tight on either side.  What tells them apart is the region
+   marker the segment opens with -- a range never runs into a colon -- so
+   the proof is looked up ahead, and only as far as the next item. */
+function regionColonAhead(t, from) {
+  for (var k = from; k < t.length; k++) {
+    var c = t.charAt(k);
+    if (c === ':') return true;
+    if (c === ';') return false;
+    if (c === '-' && t.charAt(k + 1) === '-') return false;
+  }
+  return false;
+}
+/* a "--" separator, returning where the unit it opens starts, or -1.  The
+   common shape closes a citation and opens a capital directly ("… Eddic
+   327.--Oceanic:") or after a space ("… No. 682. -- Irish:"); the rarer
+   ones print the dash after a comma, a semicolon or a word ("… 256ff.,
+   --Society Is.:", "… 65;--S. A. Indian", "Dh I 207--India:") and are
+   settled by regionColonAhead. */
+function dashSep(t, i) {
+  var prev = i > 0 ? t.charAt(i - 1) : '';
+  var next1 = t.charAt(i + 2) || '';
+  if ((/[\.\)\?\!]/.test(prev) || /\s/.test(prev)) && /[A-Z*\u201c"(\[]/.test(next1)) return i + 2;
+  var j = i + 2;
+  if (t.charAt(j) === ' ') j++;
+  if (!/[A-Z*(\[]/.test(t.charAt(j))) return -1;
+  if (/[\u201d"]/.test(nonSpaceBefore(t, i))) return -1;
+  /* Inside a special bibliography there is no colon to find: the "--" between
+     two entries closes one book and opens the next, and the entry's own year
+     is the proof (see RE_BIBITEM).  Without this the last two entries of
+     F420's list printed as a single row, "… Göttingen 1855.-- Schnetzler,
+     F.A.A., Aurelias Zauberkreis, Karlsruhe 1809--1853." */
+  if (!regionColonAhead(t, i + 2)) return bibItemAt(t, j) ? j : -1;
+  var w = /^[A-Za-z]+/.exec(t.slice(j));
+  if (w && /^[IVXLCDM]+$/.test(w[0])) return -1;
+  return j;
+}
+/* a note that carries a sentence of prose as well as its citations --
+   "… see Alexander N. Am. 278 n. 15. For bibliographies … see Thompson
+   Tales 272 n. 1" -- holds two statements, and each reads as its own row.
+   Only "For" and "See" open such a sentence here; the other capitals after
+   a stop are initials ("T. Gaster"), abbreviations ("N. Am.") or a title
+   that follows its author ("Brown Jr. The Unicorn"). */
+function sentenceBreak(t, i) {
+  return /^\.\s+(?:For|See)\s/.test(t.slice(i, i + 8));
+}
+/* A ";" normally opens the next item, but Thompson also uses it to keep
+   listing the volumes of the source he has just named, and a row that opens
+   on a bare volume numeral names no source of its own:
+
+     RTP II 156, VI 291, …; XIV 83, XVI 453, 531, XVII 504f.;   (E501)
+     Child I 179, 181--3, 245f., 502a; II 98, …; IV 250a, 464;   (C151)
+     Aarne FFC VIII 4 No. 8; XXXIII 51 No. 8;                    (A751.4)
+
+   and the same is true of a bracketed year, where the year is the *edition*
+   of the work just named:
+
+     Kristensen Danske Sagn II (1893) 227ff.; (1928) 148ff.;     (D113.1.1)
+     Kristensen Da. Sagn III (1895) 455ff.; (1931) 311ff.        (B576.2)
+
+   Cut there, the row is a volume number or a year with nothing behind it --
+   the reader loses the one thing the row carried, that the 1928 pages belong
+   to the Danske Sagn of 1893.  dashSep() has always refused a row that opens
+   on a Roman numeral for the same reason; this is the same test at ";". */
+function continuesRow(t, j) {
+  while (j < t.length && /\s/.test(t.charAt(j))) j++;
+  var rest = t.slice(j, j + 28);
+  if (/^\((?:1[5-9]|20)\d\d\)/.test(rest)) return true;
+  var w = /^([IVXLCDM]{1,7})(?=\s+\d)/.exec(rest);
+  return !!w;
+}
+/* the note's three separator levels: ";" separates the items of one
+   segment, "--" opens a new segment (a new region, a different kind of
+   research), a sentence break opens a new unit inside the same one.
+   Returns unit ranges, trimmed of the separators, each remembering which
+   segment it belongs to. */
 function citeUnits(t) {
-  var units = [], start = 0, depth = 0, i = 0;
+  var units = [], start = 0, depth = 0, i = 0, seg = 0;
   var push = function (end) {
     while (start < end && /\s/.test(t.charAt(start))) start++;
     while (end > start && /\s/.test(t.charAt(end - 1))) end--;
-    if (end > start) units.push({ s: start, e: end });
+    /* the dash of "… ibid. 256ff.,--Society Is.:" leaves the comma of the
+       item it closes dangling at the end of the row */
+    while (end > start && /[,;]/.test(t.charAt(end - 1))) end--;
+    if (end > start) units.push({ s: start, e: end, seg: seg });
   };
   while (i < t.length) {
     var ch = t.charAt(i);
     if (ch === '(') depth++;
     else if (ch === ')' && depth > 0) depth--;
     else if (depth === 0) {
-      if (ch === ';') { push(i); start = i + 1; }
+      if (ch === ';') { if (!continuesRow(t, i + 1)) { push(i); start = i + 1; } }
       else if (ch === '-' && t.charAt(i + 1) === '-') {
-        var prev = i > 0 ? t.charAt(i - 1) : '';
-        var next = t.charAt(i + 2) || '';
-        if ((/[\.\)\?\!]/.test(prev) || /\s/.test(prev)) && /[A-Z*\u201c"(\[]/.test(next)) {
-          push(i); start = i + 2; i++;
+        var cut = dashSep(t, i);
+        if (cut > 0) {
+          /* the row that ends at the dash still belongs to the segment the
+             dash closes, so the counter moves only once the row is out --
+             otherwise the darker rule would be drawn one row too early */
+          push(i);
+          /* "Cf. …" after "--" is an ordinary compare-note, not a new
+             research segment: it stays in the current one */
+          if (!/^cf\./i.test(t.slice(i + 2))) seg++;
+          start = cut; i = cut - 1;
         }
       }
+      else if (ch === '.' && sentenceBreak(t, i)) { push(i + 1); start = i + 1; }
     }
     i++;
   }
@@ -1499,10 +2453,12 @@ function citeUnits(t) {
 }
 function citeChip(sp) {
   var known = DICT.has(sp.key);
-  return '<span class="ck' + (known ? ' known' : '') + (sp.unc ? ' unc' : '') +
+  var title = known
+    ? (sp.ffc ? sp.ffc + '　' : DICT.get(sp.key).t)
+    : '全称待考：词典未收录此缩写';
+  return '<span class="ck' + (known ? ' known' : '') + (sp.unc ? ' unc' : '') + (!known ? ' unk' : '') +
     '" data-key="' + esc(sp.key) + '"' +
-    (known ? ' title="' + esc(DICT.get(sp.key).t) +
-      (sp.unc ? ' —— 未消歧：紧随其后的书名与该条目不符' : '') + '"' : '') +
+    (title ? ' title="' + esc(title) + (sp.unc ? ' —— 未消歧：紧随其后的书名与该条目不符' : '') + '"' : '') +
     '>' + esc(sp.lit) + '</span>';
 }
 /* ---- the bibliographic note, one row per source unit ----
@@ -1515,11 +2471,12 @@ function renderCite(i) {
   var t = MO[i][5];
   if (!t) return '<span class="hint">（原始条目未给出文献引用）</span>';
   var all = keySpans(t).map(function (sp) {
-    return { s: sp.s, e: sp.e, t: 'k', lit: t.slice(sp.s, sp.e), key: sp.k, st: sp.st, unc: sp.unc };
+    return { s: sp.s, e: sp.e, t: 'k', lit: t.slice(sp.s, sp.e), key: sp.k, st: sp.st, unc: sp.unc, ffc: sp.ffc };
   }).concat(groupSpans(t).map(function (g) {
-    return { s: g.s, e: g.e, t: 'r', lit: t.slice(g.s, g.e), n: g.n, k: g.k, head: g.head };
+    return { s: g.s, e: g.e, t: 'r', lit: t.slice(g.s, g.e), n: g.n, k: g.k, head: g.head, pos: g.pos };
   })).sort(function (a, b) { return a.s - b.s || (b.e - b.s) - (a.e - a.s); });
-  var rows = citeUnits(t).map(function (u) {
+  var units = citeUnits(t);
+  var rows = units.map(function (u, ui) {
     var own = all.filter(function (sp) { return sp.s >= u.s && sp.e <= u.e; });
     var pos = u.s, out = '', fulls = [], seenU = Object.create(null);
     own.forEach(function (sp) {
@@ -1531,16 +2488,20 @@ function renderCite(i) {
       }
     });
     own.forEach(function (sp) {
-      out += esc(t.slice(pos, sp.s));
+      out += xesc(t.slice(pos, sp.s));
       if (sp.t === 'r') {
-        out += '<span class="reg ck k-' + sp.k + '" data-reg="' + esc(sp.n) + '"' +
-          ' title="' + esc(KINDLABEL[sp.k] + (sp.head ? '（' + sp.head + '）' : '')) + '">' +
+        out += '<span class="reg ck k-' + sp.k + (sp.pos ? ' poss' : '') + '" data-reg="' + esc(sp.n) + '"' +
+          ' title="' + esc(KINDLABEL[sp.k] + (sp.head ? '（' + sp.head + '）' : '') +
+                          (sp.pos ? ' · 可能：语料中仅此一见，未收入切分词表' : '')) + '">' +
           esc(sp.lit) + '</span>';
       } else out += citeChip(sp);
       pos = sp.e;
     });
-    out += esc(t.slice(pos, u.e));
-    return '<div class="citerow"><div class="ct">' + out + '</div>' +
+    out += xesc(t.slice(pos, u.e));
+    /* a darker rule where the note itself changes segment ("--"), on top of
+       the dotted line between the items of one segment */
+    var segstart = ui > 0 && u.seg !== units[ui - 1].seg;
+    return '<div class="citerow' + (segstart ? ' segstart' : '') + '"><div class="ct">' + out + '</div>' +
       (fulls.length ? '<div class="fulls">' + fulls.join('') + '</div>' : '') + '</div>';
   });
   return rows.join('');
@@ -1589,6 +2550,23 @@ function grpCrumbHTML(g) {
   return '<span class="cb cg" data-gog="' + g + '">' + esc(MO[grpHeadMotif(g)][0]) +
     ' ' + esc(GRP[g][2]) + '</span>';
 }
+/* ---- parse confidence ----
+   D.conf is published metadata: one number per entry out of the deterministic
+   split/token analysis at build time (1.00 = the note is a single source
+   head).  The chip stands at the right end of the entry page's title line,
+   beside the number and the catchword it is a statement *about*.  It used to
+   ride at the end of the action row's step group, where it read as one more
+   navigation control -- the row is all "how do I leave this page", and a
+   parse-quality number is not that.  The local layer replaces its value with
+   the runtime one, so both flavours share this markup.  The three tints only
+   have to separate "trust at a glance" from "look again": hi >= .90,
+   mid >= .72, lo below (the corpus median is .78). */
+function confChipHTML(v) {
+  var band = v >= 0.9 ? 'c-hi' : v >= 0.72 ? 'c-mid' : 'c-lo';
+  return '<span class="conf ' + band + '" title="解析自信度：按切分与标注的确定性分析预计算，' +
+    '1.00 表示注记只有单一来源头。本地模式下该值会按已检条目的形状相似度上调。">置信度 ' +
+    v.toFixed(2) + '</span>';
+}
 function renderPane() {
   var pane = document.getElementById('pane');
   if (state.selCh >= 0) { state.paneMode = 'chapter'; renderChapterPane(state.selCh); return; }
@@ -1598,16 +2576,55 @@ function renderPane() {
   state.paneMode = 'detail';
   var i = state.sel, m = MO[i];
   var ks = keysOf(m[5]), rs = groupSpans(m[5]);
-  var uniq = xrefList(m[4]);
+  var uniq = xrefAll(m);
+
+  /* the action row lives in the fixed-height top strip, not under the head:
+     the heading can run to several lines (a long title, a wrapped breadcrumb
+     trail) and used to push these buttons down by a different amount on every
+     page.  "在分类树中定位" belongs with the ways off the page, so it stays on
+     the left; the step pair is grouped and pinned right by .steps in the CSS.
+
+     The empty .loctools span is where the local layer puts the 已检查 checkbox
+     and the 本地× switch -- between the way off the page and the step group,
+     so the two local controls stand together.  Empty it is display:none, which
+     is what the published copy ships (the local fragment is cut before upload).
+
+     Nothing in this row is *about the entry*: every control is a way out of
+     the page.  The parse-confidence chip is exactly the opposite, which is why
+     it now stands in the head instead (see confChipHTML). */
+  var acts =
+    '<button class="btn" data-act="tree">在分类树中定位</button>' +
+    '<span class="loctools" id="loctools"></span>' +
+    /* The step buttons grey out at either end instead of wrapping round -- the
+       same treatment the Back button gets, and for the same reason: a button
+       that comes and goes would resize the strip.  Which end is "the end"
+       depends on what is being stepped through, so the neighbours come from
+       stepTarget(), the same call the button itself will make. */
+    '<span class="steps">' +
+    '<button class="btn" data-act="prev"' +
+      (stepTarget(i, -1) < 0 ? ' disabled' : '') +
+      ' title="' + stepHint(-1, i) + '" aria-label="上一条">↑</button>' +
+    '<button class="btn" data-act="next"' +
+      (stepTarget(i, 1) < 0 ? ' disabled' : '') +
+      ' title="' + stepHint(1, i) + '" aria-label="下一条">↓</button>' +
+    '</span>';
 
   var h = '<div class="doc">';
-  h += backBar();          /* generic: wherever this page was reached from */
+  h += backBar(acts);      /* generic: wherever this page was reached from */
   var sp = splitName(i);
   h += '<div class="dhead">';
   h += '<div class="dnum">' + esc(m[0]) + '</div>';
-  h += '<div class="dtitle">' +
-    (sp.name ? '<span class="ttl">' + xrefHTML(sp.name) + '</span>' : renderDesc(i)) + '</div>';
-  if (sp.name && sp.rest) h += '<div class="ddesc">' + xrefHTML(sp.rest) + '</div>';
+  /* The title line carries the confidence chip at its far right: the number,
+     the catchword and "how far this parse can be trusted" belong to the same
+     statement.  .dtxt holds the title so the chip has something to sit beside
+     -- .dtitle is inline content (prose with xref chips in it), and only a
+     wrapper keeps that flowing as text once the row becomes a flex line. */
+  h += '<div class="dtitle confrow"><span class="dtxt">' +
+    (sp.name ? '<span class="ttl">' + xrefHTML(sp.name) + '</span>' : renderDesc(i)) +
+    '</span>' + (D.conf ? confChipHTML(D.conf[i] || 0) : '') + '</div>';
+  /* the mark can sit on either half: A2091 prints "Origin of spider.†1 (Cf.
+     †A1751.)", where the catchword is the name and the dagger is in the rest */
+  if (sp.name && sp.rest) h += '<div class="ddesc">' + fnHTML(xrefHTML(sp.rest), m[0]) + '</div>';
   h += '<div class="crumbs">' + breadcrumb(i) + '</div>';
   h += '</div>';
 
@@ -1621,12 +2638,9 @@ function renderPane() {
       }).filter(Boolean).join(' · ') + '</div>';
   }
 
-  h += '<div class="acts">' +
-    '<button class="btn" data-act="tree">在分类树中定位</button>' +
-    '<button class="btn" data-act="copy">复制编号 / 引用</button>' +
-    '<button class="btn" data-act="prev">↑ 上一条</button>' +
-    '<button class="btn" data-act="next">↓ 下一条</button>' +
-    '</div>';
+  if (SOLO.indexOf(i) >= 0) {
+    h += '<div class="hint" style="margin:10px 0 0">原书把这条排成组首（正体粗体），但其下没有其他条目。</div>';
+  }
 
   /* the entry as the book prints it.  Everything above this point is the
      result of parsing that line: a catchword lifted out of the font layer, a
@@ -1665,6 +2679,27 @@ function renderPane() {
     h += '<div class="sect"><h3>子母题（' + kidM[i] + '）</h3><div>' + childChips(i) + '</div></div>';
   }
   var par = MO[i][3];
+
+  /* reverse references: entries whose † cross-references reach this motif --
+     including everything that reaches it through its ancestors (citing †A12
+     cites the whole group of A12) or through a printed range */
+  var back = [], seenB = Object.create(null);
+  for (var a = i; a >= 0 && a < N; a = MO[a][3]) {
+    for (var rr = RREFMAP.get(a) || [], k2 = 0; k2 < rr.length; k2++) {
+      if (!seenB[rr[k2]] && rr[k2] !== i) { seenB[rr[k2]] = 1; back.push(rr[k2]); }
+    }
+  }
+  if (back.length) {
+    back.sort(function (x, y) { return MO[x][0] < MO[y][0] ? -1 : 1; });
+    h += '<div class="sect"><h3>被引用（' + back.length + '）</h3><div>' +
+      back.slice(0, 300).map(function (j) {
+        return '<span class="xref" data-go="' + esc(MO[j][0]) + '" title="' +
+          esc(MO[j][4].slice(0, 120)) + '">' + esc(MO[j][0]) + '</span>';
+      }).join('') +
+      (back.length > 300 ? '<span class="hint">… 共 ' + back.length + ' 条</span>' : '') +
+      '</div></div>';
+  }
+
   if (par >= 0) {
     h += '<div class="sect"><h3>父条目</h3><div><span class="xref" data-go="' + MO[par][0] + '">' +
       esc(MO[par][0]) + '</span> <span class="hint">' + shortDesc(par, 110) + '</span></div></div>';
@@ -1677,7 +2712,10 @@ function renderPane() {
     '<span class="kv"><b>引用条目数</b><span>' + ks.length + '</span></span>' +
     '<span class="kv"><b>所属分类</b><span>' + (MO[i][2] >= 0 ? esc(DV[MO[i][2]][3]) : '—') + '</span></span>' +
     '</div></div>';
-  pane.innerHTML = h;
+  /* localDecorate swaps the base confidence chip for the runtime one and adds
+     the local checkbox; the published copy has the fragment cut out, and the
+     typeof guard is what makes that cut safe */
+  pane.innerHTML = typeof localDecorate === 'function' ? localDecorate(i, h) : h;
   pane.scrollTop = 0;
 }
 /* ---- the entry as the book prints it ----
@@ -2318,6 +3356,39 @@ function atuSectionHTML(num) {
 }
 
 /* ============================ stats view ============================ */
+
+/* How Thompson's bibliography star marks distribute over the corpus.
+ *
+ * The per-entry half is the expensive one -- it asks every entry for its keys,
+ * which is the whole corpus through keySpans() -- and it is a pure function of
+ * the data, while renderStats() runs on every switch to this tab.  So it is
+ * computed once and kept.  (keysOf() memoises the parse too, so the reverse
+ * index's own pass over the same citations warms this up; the two together
+ * are what took the 统计 tab from most of a second to nothing.)
+ *
+ * The key-level counts come straight off postKey._s, which buildReverseIndex()
+ * has already filled with each key's star level.  Must run after the index. */
+var STARSTAT = null;
+function starStats() {
+  if (STARSTAT) return STARSTAT;
+  var s1 = 0, s2 = 0, sboth = 0, k1 = 0, k2 = 0;
+  for (var i = 0; i < N; i++) {
+    var kk = keysOf(MO[i][5]), one = false, two = false;
+    for (var j = 0; j < kk.length; j++) {
+      if (kk[j].s >= 2) two = true; else if (kk[j].s >= 1) one = true;
+    }
+    if (one) s1++;
+    if (two) s2++;
+    if (one && two) sboth++;
+  }
+  postKey.forEach(function (arr) {
+    var st = arr._s || 0;
+    if (st >= 2) k2++; else if (st >= 1) k1++;
+  });
+  STARSTAT = { s1: s1, s2: s2, sboth: sboth, k1: k1, k2: k2 };
+  return STARSTAT;
+}
+
 function renderStats() {
   var host = document.getElementById('stats-body');
   /* the star counts need the reverse index; without it the card shows "—" and
@@ -2366,19 +3437,8 @@ function renderStats() {
      worth counting rather than just filtering on */
   var s1 = 0, s2 = 0, sboth = 0, k1 = 0, k2 = 0;
   if (idxReady) {
-    for (var si = 0; si < N; si++) {
-      var one = false, two = false, kk = keysOf(MO[si][5]);
-      for (var sj = 0; sj < kk.length; sj++) {
-        if (kk[sj].s >= 2) two = true; else if (kk[sj].s >= 1) one = true;
-      }
-      if (one) s1++;
-      if (two) s2++;
-      if (one && two) sboth++;
-    }
-    postKey.forEach(function (arr, k) {
-      var st = arr._s || 0;
-      if (st >= 2) k2++; else if (st >= 1) k1++;
-    });
+    var ss = starStats();
+    s1 = ss.s1; s2 = ss.s2; sboth = ss.sboth; k1 = ss.k1; k2 = ss.k2;
   }
   h += '<h4 style="margin-top:18px">书目星标</h4>' +
     '<div class="hint" style="margin:0 0 8px">Thompson 在书目里写明：' +
@@ -2463,7 +3523,19 @@ function DOCPAGES() { return (D.meta.pdfPages || 2465).toLocaleString(); }
    民族 and 文献·宗教传统 mark the corpus can hold.  This page is that
    vocabulary, one row per mark with the number of entries that cite it
    (zero for the heads the corpus only implies), one click sending the mark
-   into the advanced search. */
+   into the advanced search.
+
+   A fourth segment carries the *possible* marks: names the corpus prints once
+   and nowhere else, or that only a list of variants vouches for ("(Eskimo,
+   Cherokee, Mandan, Kiowa, ...)").  They are marked in the citations like any
+   other, but they are kept out of the three counts and out of the vocabulary
+   total -- a name vouched for once is not a source mark until Thompson prints
+   it as one twice. */
+
+/* the three certain kinds, then the possible tier */
+var TAGKINDS = KINDORDER.concat(['poss']);
+var TAGLABEL = { geo: KINDLABEL.geo, people: KINDLABEL.people, text: KINDLABEL.text,
+                 poss: '可能的' };
 
 function renderTags() {
   var host = document.getElementById('tags-body');
@@ -2475,15 +3547,17 @@ function renderTags() {
     return;
   }
   var q = (state.tagQ || '').toLowerCase();
-  var used = 0, covered = new Uint8Array(N);
-  var rows = { geo: [], people: [], text: [] };
+  var used = 0, covered = new Uint8Array(N), possUsed = 0;
+  var rows = { geo: [], people: [], text: [], poss: [] };
   GROUPS.forEach(function (g) {
     var name = g[0], kind = g[1];
     if (TAG_ALIAS[name]) return;     /* an alias: its counts fold into the mark */
     var a = postReg.get(name) || [];
-    if (a.length) used++;
+    if (g[2]) {                      /* a possible mark: marked, never counted */
+      if (a.length) possUsed++;
+    } else if (a.length) used++;
     for (var i = 0; i < a.length; i++) covered[a[i]] = 1;
-    rows[kind].push({ n: name, c: a.length });
+    rows[g[2] ? 'poss' : kind].push({ n: name, c: a.length, k: kind });
   });
   var coveredN = 0;
   for (var ci = 0; ci < N; ci++) coveredN += covered[ci];
@@ -2491,36 +3565,43 @@ function renderTags() {
   var h = '<div class="wrap"><h2 class="pt">来源 · 标记</h2>' +
     '<p class="pd">高级检索里 <code>region:</code> 的全部可能取值：Thompson 在每条例证前写一个出处标记。' +
     '点击任一行即把 <code>region: "标记"</code> 送入高级检索；标记沿收窄关系向上兼容' +
-    '（<code>region: Oceanic</code> 同时命中标 <code>Oceanic (Tonga)</code> 的条目）。</p>' +
+    '（<code>region: Oceanic</code> 同时命中标 <code>Oceanic (Tonga)</code> 的条目）。' +
+    '<b>可能的</b>一栏是语料只印过一次、两处形状都对不上的名称，界面上带 <span class="tag poss" style="cursor:default">' +
+    '示例<span class="q">?</span></span> 标记，不计入上方数字。它们照样可以检索，' +
+    '点击后与其他标记一样送入高级检索。</p>' +
     '<div class="kpis">' +
-    '<div class="kpi"><div class="v">' + GROUPS.length.toLocaleString() + '</div><div class="l">词表标记</div></div>' +
+    '<div class="kpi"><div class="v">' + (GROUPS.length - rows.poss.length).toLocaleString() + '</div><div class="l">词表标记</div></div>' +
     '<div class="kpi"><div class="v">' + used.toLocaleString() + '</div><div class="l">正文实际出现</div></div>' +
+    '<div class="kpi"><div class="v">' + rows.poss.length.toLocaleString() + '</div><div class="l">可能（孤证）</div></div>' +
     '<div class="kpi"><div class="v">' + coveredN.toLocaleString() + '</div><div class="l">带标记的条目</div></div></div>' +
     '<div class="frow" style="margin:0 0 10px">' +
     '<span style="display:inline-flex;gap:2px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:2px">' +
-    KINDORDER.map(function (kind) {
+    TAGKINDS.map(function (kind) {
       var cur = (state.tagKind === kind);
       return '<button class="seg' + (cur ? ' on' : '') + '" data-tagkind="' + kind + '">' +
-        KINDLABEL[kind] + '（' + rows[kind].length + '）</button>';
+        TAGLABEL[kind] + '（' + rows[kind].length + '）</button>';
     }).join('') + '</span>' +
     '<input id="tagq" placeholder="过滤标记…" value="' + esc(state.tagQ || '') + '" ' +
     'style="padding:6px 10px;border:1px solid var(--line);border-radius:7px;background:var(--panel);width:260px;outline:none">' +
     '<span class="hint">被引 0 次的是词表里有、正文尚未用到的头</span></div>';
 
-  var kind = KINDORDER.indexOf(state.tagKind) >= 0 ? state.tagKind : 'geo';
+  var kind = TAGKINDS.indexOf(state.tagKind) >= 0 ? state.tagKind : 'geo';
   var list = rows[kind].slice();
   if (q) list = list.filter(function (r) { return r.n.toLowerCase().indexOf(q) >= 0; });
   list.sort(function (a, b) { return b.c - a.c || (a.n < b.n ? -1 : a.n > b.n ? 1 : 0); });
-  var usedN = list.filter(function (r) { return r.c; }).length;
   h += '<table class="stat"><tbody>' + list.map(function (r) {
+    var lab = (kind === 'poss')
+      ? '<span class="glabel k-' + r.k + '" style="margin-left:6px">' + TAGLABEL[r.k] + '</span>' : '';
     return '<tr data-reg="' + esc(r.n) + '"' + (r.c ? '' : ' style="opacity:.5"') + '>' +
-      '<td style="font-family:var(--mono);font-weight:600;color:var(--ink)">' + esc(r.n) + '</td>' +
+      '<td style="font-family:var(--mono);font-weight:600;color:var(--ink)">' + esc(r.n) + lab +
+      (kind === 'poss' ? '<span class="q">?</span>' : '') + '</td>' +
       '<td class="n">' + (r.c ? r.c.toLocaleString() : '—') + '</td>' +
       '</tr>';
   }).join('') + '</tbody></table>';
   h += '</div>';
   host.innerHTML = h;
 }
+
 
 /* ============================ views / wiring ============================ */
 function setView(v) {
@@ -2670,7 +3751,7 @@ function moreResults(n) {
     var j = res[i];
     html.push('<div class="resrow' + (state.sel === j ? ' sel' : '') + '" data-res="' + j + '">' +
       '<span class="num">' + esc(MO[j][0]) + '</span>' +
-      '<span class="rdsc">' + shortDesc(j, 190) + '</span></div>');
+      '<span class="rdsc">' + shortDesc(j, 190) + '</span>' + rowKeyHTML(j) + '</div>');
   }
   list.insertAdjacentHTML('beforeend', html.join(''));
   state.shownRes = to;
@@ -2743,16 +3824,29 @@ function atuSearchHTML(q) {
 }
 /* the strip shown on a detail page: a generic "back to where I came from"
    (which covers a cross-reference hop as much as a search result) plus, while
-   a search is active, a shortcut that keeps the list's scroll position */
-function backBar() {
-  var h = navBackBtn();
+   a search is active, a shortcut that keeps the list's scroll position.  The
+   entry page's own action buttons ride in the same fixed-height strip, so
+   their place no longer depends on how tall the heading above them is.
+
+   While a search is live the strip carries two separate thoughts -- "here is
+   the list you are reading through" and "here is what you can do with this
+   entry" -- and they get a line each (`.backbar.q`).  One line meant the long
+   query and the long action row fighting over the width, and at a narrow
+   window the loser was the buttons, which wrapped and made the strip tall.
+   The seam between the two groups is the only place the strip breaks. */
+function backBar(acts) {
+  var back = navBackBtn();
+  var a = acts ? '<div class="acts">' + acts + '</div>' : '';
   if (state.q) {
     var n = state.results ? state.results.length : 0;
-    h += '<button class="btn" data-act="backq">↑ 搜索结果</button>' +
+    return '<div class="backbar q">' +
+      '<div class="brow">' + back +
+      '<button class="btn" data-act="backq">↑ 搜索结果</button>' +
       '<span class="hint">“' + esc(state.q) + '” · ' + n.toLocaleString() +
-      (state.resCapped ? '+' : '') + ' 条结果</span>';
+      (state.resCapped ? '+' : '') + ' 条结果</span></div>' + a +
+      '</div>';
   }
-  return h ? '<div class="backbar">' + h + '</div>' : '';
+  return '<div class="backbar">' + back + a + '</div>';
 }
 function toggleExpand(id, rowIdx) {
   state.expanded[id] = state.expanded[id] ? 0 : 1;
@@ -3007,26 +4101,18 @@ function boot() {
         return;
       }
       if (a === 'more') { moreResults(RES_CHUNK); return; }
+      if (a === 'localoff' && typeof localSetActive === 'function') {
+        localSetActive(false); renderPane(); return;
+      }
       if (a === 'tree') {
         /* leave search mode and locate the entry inside the classification tree */
         state.q = ''; setQuery('');
         reveal(state.sel); flatten(); renderList(true); renderPane(); scrollToSel();
         updateURLState(true);
       }
-      else if (a === 'copy') {
-        var txt = MO[state.sel][0] + ' — Thompson, Motif-Index of Folk-Literature: ' + MO[state.sel][4];
-        if (navigator.clipboard) navigator.clipboard.writeText(txt);
-        toast('已复制：' + MO[state.sel][0]);
-      } else if (a === 'prev' || a === 'next') {
-        var i2 = state.sel, p2 = MO[i2][3];
-        var sib = p2 >= 0 ? firstM[p2] : null;
-        if (p2 >= 0) { var c2 = firstM[p2]; while (c2 >= 0) { if (c2 === i2) break; c2 = nextM[c2]; } sib = (a === 'next' ? nextM[c2] : null); }
-        if (a === 'prev' && p2 >= 0) { var cc = firstM[p2], prev = -1; while (cc >= 0 && cc !== i2) { prev = cc; cc = nextM[cc]; } sib = prev; }
-        if (sib && sib >= 0) { goTo(MO[sib][0]); }
-        else {
-          var j2 = i2 + (a === 'next' ? 1 : -1);
-          if (j2 >= 0 && j2 < N) goTo(MO[j2][0]);
-        }
+      else if (a === 'prev' || a === 'next') {
+        /* one step along the printed order -- see stepEntry() */
+        stepEntry(a === 'next' ? 1 : -1);
       }
       return;
     }
@@ -3060,6 +4146,11 @@ function boot() {
     }
   });
   document.addEventListener('change', function (ev) {
+    if (ev.target.id === 'locchk' && state.sel >= 0 && typeof setChecked === 'function') {
+      setChecked(state.sel, ev.target.checked);
+      renderPane();
+      return;
+    }
     if (ev.target.id === 'litcited') { state.litCited = ev.target.checked; renderRefs(); }
     if (ev.target.id === 'litbib') { state.litBib = ev.target.checked; renderRefs(); }
     if (ev.target.id === 'litlink') { state.litLink = ev.target.checked; renderRefs(); }
@@ -3070,7 +4161,21 @@ function boot() {
     else if (ev.key === 'Enter' && ev.target.id === 'numjump') {
       var v = ev.target.value.trim(); if (v) { if (!goTo(v)) toast('未找到 ' + v); ev.target.value = ''; }
     } else if (ev.key === 'Enter' && ev.target.id === 'q') { applyQuery(ev.target.value.trim(), false, true); ev.target.blur(); }
+    /* Alt+↑ / Alt+↓ step to the previous / next entry on any page that shows
+       one -- the keyboard twin of the two buttons in the action row.  Alt is
+       required because a bare arrow key belongs to whichever panel has focus,
+       and Alt+←/→ already belong to the browser's history. */
+    else if (ev.altKey && (ev.key === 'ArrowUp' || ev.key === 'ArrowDown')) {
+      var tn = ev.target && ev.target.tagName;
+      if (state.sel >= 0 && tn !== 'INPUT' && tn !== 'TEXTAREA' && tn !== 'SELECT') {
+        ev.preventDefault();
+        stepEntry(ev.key === 'ArrowDown' ? 1 : -1);
+      }
+    }
   });
+  /* local mode (checked flags + confidence badge) lives in 96-local.js and is
+     switched on there -- a published copy ships without that fragment */
+
   if (scroller) scroller.addEventListener('scroll', function () { renderList(false); });
   window.addEventListener('hashchange', routeFromHash);
   window.addEventListener('popstate', onPop);   /* Back / Forward between pages */
@@ -3226,6 +4331,9 @@ window.MIApp = {
     xrefHTML: xrefHTML,
     xrefList: xrefList,
     keySpans: keySpans,
+    citeUnits: citeUnits,
+    renderDesc: renderDesc,
+    fnAt: function (num, d) { return FN[num + ':' + d] || null; },
     divOfRange: divOfRange,
     litRows: litRows,
     worksMap: worksMap,
@@ -3240,6 +4348,13 @@ window.MIApp = {
     advNeedsIndex: advNeedsIndex,
     setAdvMode: setAdvMode,
     syncQMode: syncQMode,
+    /* the local-mode surface (96-local.js).  Each is guarded: the published
+       build ships without that fragment, and these have to stay inert there. */
+    entryConf: function (i) { return typeof entryConf === 'function' ? entryConf(i) : 0; },
+    setChecked: function (i, on) { if (typeof setChecked === 'function') setChecked(i, on); },
+    isChecked: function (i) { return typeof isChecked === 'function' ? isChecked(i) : false; },
+    localSetActive: function (on) { if (typeof localSetActive === 'function') localSetActive(on); },
+    localForce: function (on) { if (typeof LOCAL !== 'undefined') LOCAL.force = !!on; },
     rows: function () { return state.rows; },
     byNum: byNum,
     grpOf: function (i) { return grpOf[i]; },

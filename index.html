@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Motif-Index of Folk-Literature — 母题索引可视化</title>
-<link rel="stylesheet" href="app.css?v=c88ed0d">
+<link rel="stylesheet" href="app.css?v=3590369">
 </head>
 <body>
 
@@ -134,11 +134,24 @@
           <tr><td style="font-family:var(--mono)">star</td><td style="color:var(--ink2)"><code>star: 1</code> 至少引用一部单星文献；<code>star: 2</code> 带双星；<code>star: 3</code> 两者兼备</td></tr>
           <tr><td style="font-family:var(--mono)">has</td><td style="color:var(--ink2)"><code>cite</code>（有文献注记）/ <code>name</code>（有词头）/ <code>group</code>（在组内）/ <code>xref</code>（有 † 交叉引用）/ <code>dup</code>（重复印刷编号）</td></tr>
           <tr><td style="font-family:var(--mono)">page</td><td style="color:var(--ink2)">PDF 页序号，支持比较：<code>page: &lt;100</code></td></tr>
+          <tr><td style="font-family:var(--mono)">filter</td><td style="color:var(--ink2)"><code>filter: checked</code> 只看你勾选过「已检查」的条目。勾选记录只存在本地（见「本地模式」），发布站上没有这份记录，所以该条件在那里不命中任何条目</td></tr>
         </tbody></table>
         <p style="color:var(--ink2);font-size:13px;line-height:1.85;margin:12px 0 0">
           值的四种写法：裸词（大小写不敏感子串）、<code>带*的词</code>（锚定通配）、
-          <code>"带空格的串"</code>（字面子串）、<code>/正则/flags</code>。
+          <code>"带空格的串"</code>（字面子串）、<code>/正则/flags</code>
+          （flags 照你写的来，不写 <code>i</code> 就区分大小写）。
+          <b>开头的 <code>*</code> 是原书的标记而不是通配符</b>：Thompson 用它标异文汇编，
+          所以 <code>ref: *Types</code> 找的是形如 <code>*Types</code> 的文献；要当通配符，
+          星号得放在词的中间或末尾。
           解析失败时搜索框下方会指出出错的字符位置；查询经 URL 的 <code>adv=1</code> 分享。
+        </p>
+        <p style="color:var(--ink2);font-size:13px;line-height:1.85;margin:10px 0 0">
+          结果可随后排序：<code>| sort: [reverse] &lt;键&gt;</code>。键取
+          <code>body-length</code>（注记长度）、<code>head-length</code>（词头长度）、
+          <code>label</code>（编号自然序）、<code>confidence</code>（解析把握）、
+          <code>subentry-number</code>（子母题数）；<code>reverse</code> 反序，
+          <code>then: &lt;键&gt;</code> 接平局链。例：
+          <code>has: cite | sort: reverse body-length</code>。
         </p>
       </div>
 
@@ -158,6 +171,7 @@
           <tr><td style="font-family:var(--mono)">/</td><td style="color:var(--ink2)">聚焦搜索框</td></tr>
           <tr><td style="font-family:var(--mono)">Esc</td><td style="color:var(--ink2)">清空搜索</td></tr>
           <tr><td style="font-family:var(--mono)">Alt+← / Alt+→</td><td style="color:var(--ink2)">后退 / 前进</td></tr>
+          <tr><td style="font-family:var(--mono)">Alt+↑ / Alt+↓</td><td style="color:var(--ink2)">上一条 / 下一条 —— 搜索进行中时按<b>结果列表</b>的顺序走（跟随排序），否则沿原书印刷顺序，会进入子母题</td></tr>
         </tbody></table>
       </div>
     </div></div>
@@ -167,7 +181,7 @@
 <button id="totop" title="回到顶部">↑ 顶部</button>
 <div class="toast" id="toast"></div>
 
-<script src="build/data.js?v=c88ed0d"></script>
-<script src="app.js?v=c88ed0d"></script>
+<script src="build/data.js?v=3590369"></script>
+<script src="app.js?v=3590369"></script>
 </body>
 </html>
