@@ -18,6 +18,12 @@
     "Noto Sans CJK SC","Source Han Sans SC","Noto Sans SC",monospace;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
   --row:23px;
+  /* one height for every control in the top bar.  The mode switch (33px), the
+     search box (38px), the history arrows (27px) and the tab strip (34px) were
+     each sized by their own padding, so the row had four different heights
+     centred on one line and the box stood a few pixels proud of the buttons
+     beside it.  They all read --ctl now. */
+  --ctl:32px;
 }
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -46,17 +52,18 @@ code{font-family:var(--mono);font-size:.94em;background:var(--panel2);border:1px
 .brand .t1{font-weight:650;font-size:14.5px;letter-spacing:.1px}
 .brand .t2{font-size:11px;color:var(--muted)}
 .searchwrap{position:relative;flex:1 1 340px;max-width:560px;display:flex;align-items:center}
-.searchwrap input{flex:1 1 auto;min-width:0;padding:7px 30px 7px 11px;border:1px solid var(--line);border-radius:8px;
-  background:var(--panel2);outline:none}
+.searchwrap input{flex:1 1 auto;min-width:0;height:var(--ctl);padding:0 30px 0 11px;border:1px solid var(--line);
+  border-radius:8px;background:var(--panel2);outline:none}
 .searchwrap input:focus{border-color:var(--accent);background:#fff;box-shadow:0 0 0 3px var(--accent-soft)}
 .searchwrap .clr{position:absolute;right:6px;top:50%;transform:translateY(-50%);color:var(--faint);
   font-size:16px;padding:0 6px;display:none}
 .searchwrap.filled .clr{display:block}
 /* the search-box mode switch: 普通 keeps the substring search, 高级 runs the
    query language documented on the about page */
-.qmode{display:flex;flex:0 0 auto;background:var(--panel2);border:1px solid var(--line);
-  border-radius:8px;padding:2px;margin-right:7px}
-.qmode button{padding:4px 9px;border-radius:6px;font-size:12px;color:var(--ink2);white-space:nowrap}
+.qmode{display:flex;flex:0 0 auto;align-items:center;height:var(--ctl);
+  background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:2px;margin-right:7px}
+.qmode button{display:inline-flex;align-items:center;height:calc(var(--ctl) - 6px);padding:0 9px;
+  border-radius:6px;font-size:12px;color:var(--ink2);white-space:nowrap}
 .qmode button:hover{background:#f0ece4}
 .qmode button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
 /* where a failed advanced query says so: a card hanging under the box, so the
@@ -66,12 +73,14 @@ code{font-family:var(--mono);font-size:.94em;background:var(--panel2);border:1px
   color:#8a3d22;box-shadow:0 6px 18px rgba(40,25,10,.12)}
 /* back / forward: generic history navigation (not just "back to results") */
 .histnav{display:flex;gap:2px;flex:0 0 auto}
-.hbtn{width:27px;height:27px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);
+.hbtn{width:var(--ctl);height:var(--ctl);border-radius:7px;border:1px solid var(--line);background:var(--panel2);
   color:var(--ink2);font-size:13px;line-height:1}
 .hbtn:hover:not([disabled]){border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
 .hbtn[disabled]{opacity:.35;cursor:default}
-.tabs{display:flex;gap:2px;flex:0 0 auto;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:2px}
-.tabs button{padding:5px 11px;border-radius:6px;color:var(--ink2);font-size:12.5px}
+.tabs{display:flex;gap:2px;flex:0 0 auto;align-items:center;height:var(--ctl);
+  background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:2px}
+.tabs button{display:inline-flex;align-items:center;height:calc(var(--ctl) - 6px);padding:0 11px;
+  border-radius:6px;color:var(--ink2);font-size:12.5px}
 .tabs button:hover{background:#f0ece4}
 .tabs button.on{background:var(--panel);color:var(--ink);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.07)}
 
@@ -85,11 +94,21 @@ aside{width:376px;flex:0 0 auto;display:flex;flex-direction:column;border-right:
 #dragbar{width:5px;flex:0 0 auto;cursor:col-resize;background:transparent;margin-left:-5px;z-index:5}
 #dragbar:hover{background:var(--accent-soft)}
 
-/* ---------- filters ---------- */
+/* ---------- filters ----------
+   Two rows: the A–Z run, then one tools line.  The "章" label that used to open
+   the block said nothing the letters do not -- and its 34px column indented the
+   first line of the run only, so the letters, the two links and the count all
+   started at different x.  Everything now begins at the block's own padding. */
 .filters{padding:9px 11px 8px;border-bottom:1px solid var(--line);background:var(--panel)}
 .frow{display:flex;align-items:center;gap:7px;margin-bottom:6px;flex-wrap:wrap}
 .frow:last-child{margin-bottom:0}
-.flabel{font-size:11px;color:var(--muted);flex:0 0 auto;min-width:34px}
+/* the tools line keeps its shape with or without a filter: the two ways to set
+   the whole run stand left, the count and 重置 are pushed right */
+.frow.fbar{flex-wrap:nowrap;gap:9px;margin:7px 0 0}
+/* the count is the one member that may give way: a narrow drawer ellipsises it
+   rather than pushing 重置 out of the row */
+.frow.fbar #fstat{margin-left:auto;min-width:0;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
 .chips{display:flex;flex-wrap:wrap;gap:3px}
 .chip{padding:1px 6px;border:1px solid var(--line);border-radius:5px;font:600 11px/1.7 var(--mono);
   color:var(--ink2);background:var(--panel2)}
@@ -109,6 +128,15 @@ input[type=checkbox]{accent-color:var(--accent)}
 .treehead{display:flex;align-items:center;gap:6px;padding:6px 11px;border-bottom:1px solid var(--line);
   font-size:11px;color:var(--muted);background:var(--panel)}
 .treehead b{color:var(--ink2);font-weight:600}
+/* The jump box used to carry an inline style: the mono font at 11.5px with 2px
+   of padding, which made the field ~5px taller than the label and the count on
+   the same line, with its text riding high inside -- and the count sat glued to
+   its right edge.  Sized to the line's own height, and the count pushed out. */
+.treehead .jump{width:88px;height:19px;padding:0 6px;border:1px solid var(--line);border-radius:5px;
+  font:600 11.5px/17px var(--mono);background:var(--panel2);color:var(--ink2);outline:none}
+.treehead .jump:focus{border-color:var(--accent);background:#fff}
+.treehead .jump::placeholder{color:var(--faint);font-weight:400}
+.treehead #treecount{margin-left:auto;font-size:11px}
 #scroller{flex:1 1 auto;overflow:auto;position:relative;background:var(--panel)}
 #spacer{position:relative;width:100%}
 #vlist{position:absolute;top:0;left:0;right:0}
@@ -170,23 +198,18 @@ input[type=checkbox]{accent-color:var(--accent)}
    Pages whose first child is not the strip keep the gap untouched. */
 .doc:has(>.backbar:first-child){padding-top:0}
 .dhead{border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:16px}
+/* the number, and the parse confidence as its tooltip (the title attribute) --
+   no chip: see confText() in 60-pane.js.  The local layer prints its own
+   runtime chip and marks the line .confrow so the chip holds the far right of
+   it, where the published page used to keep one; without that class the line
+   stays a plain block and the published copy has nothing extra to lay out. */
 .dnum{font-family:var(--mono);font-size:30px;font-weight:700;color:var(--accent);letter-spacing:-.5px;line-height:1.1}
+.dnum.confrow{display:flex;align-items:baseline;gap:12px}
+.dnum.confrow>.conf{flex:0 0 auto;margin-left:auto;font-size:11.5px;padding:3px 8px;letter-spacing:0}
 .dtitle{font-size:19px;font-weight:600;margin-top:5px;line-height:1.42}
 /* an entry prints as two parts: Thompson's catchword (italic in the book) and
    the prose description that follows it */
 .dtitle .ttl{font-style:italic;font-weight:600;color:var(--ink)}
-/* The detail page's title line is a row: the title keeps the left, the parse
-   confidence chip holds the far right of the same line.  Only the detail pane
-   gets .confrow -- the other heads that borrow .dtitle (a division, a group, a
-   chapter, a result set) have no chip to align and keep the plain block.  The
-   title sits in its own .dtxt so the row can be flex at all: .dtitle's content
-   is prose with xref chips in it, and flex would turn every one of those into
-   a separate item and stop it reading as one paragraph.  Baseline, so a title
-   that wraps leaves the chip level with its first line rather than centred on
-   the block. */
-.dtitle.confrow{display:flex;align-items:baseline;gap:14px}
-.dtitle.confrow>.dtxt{flex:1 1 auto;min-width:0}
-.dtitle.confrow>.conf{flex:0 0 auto}
 .ddesc{margin-top:8px;font-size:14.6px;line-height:1.72;color:var(--ink)}
 .crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:9px;font-size:11.5px;color:var(--muted)}
 .crumbs a,.crumbs span.cb{cursor:pointer;color:var(--ink2);border-bottom:1px dotted var(--faint)}
@@ -196,6 +219,16 @@ input[type=checkbox]{accent-color:var(--accent)}
 .sect>h3{font-size:11px;text-transform:uppercase;letter-spacing:.9px;color:var(--muted);font-weight:700;
   margin:0 0 8px;display:flex;align-items:center;gap:8px}
 .sect>h3::after{content:"";flex:1;height:1px;background:var(--line)}
+/* A section whose heading folds its body (the ATU lists).  The caret is the
+   only thing that says the heading is a handle; the rule after it stays put so
+   a folded and an open section look like the same heading at rest. */
+.sect>h3.foldh{cursor:pointer;user-select:none}
+.sect>h3.foldh::before{content:"▾";flex:0 0 auto;font-size:10px;color:var(--muted);letter-spacing:0}
+.sect.closed>h3.foldh::before{content:"▸"}
+.sect>h3.foldh:hover{color:var(--accent)}
+.sect>h3.foldh:hover::before,.sect>h3.foldh:focus-visible::before{color:var(--accent)}
+.sect>h3.foldh:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+.sect.closed>.foldbody{display:none}
 /* the entry as the book prints it -- folded away, since for most entries it
    only repeats the description and the note printed just above it */
 .rawbox{margin-top:20px;border:1px solid var(--line);border-radius:7px;background:var(--panel)}
@@ -237,11 +270,10 @@ input[type=checkbox]{accent-color:var(--accent)}
 .loc-chk{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:var(--ink2);
   border:1px solid var(--line);border-radius:7px;padding:4px 9px;background:var(--panel2);
   white-space:nowrap;flex:0 0 auto}
-/* The parse-confidence chip -- published, on every entry page, at the far right
-   of the title line -- and the per-row value a `sort:` pipe shows: the digit
-   the reader is judging the order by, whatever key that is.  The tints follow
-   the tree's own palette: green can be trusted, brown is ordinary, red look
-   again. */
+/* The parse-confidence chip (local mode only now, on the number's line) and the
+   per-row value a `sort:` pipe shows: the digit the reader is judging the order
+   by, whatever key that is.  The tints follow the tree's own palette: green can
+   be trusted, brown is ordinary, red look again. */
 .conf{display:inline-flex;align-items:center;justify-content:center;text-align:center;
   font-family:var(--mono);font-size:12px;line-height:1.25;padding:3px 9px;border-radius:9px;white-space:nowrap}
 .conf.c-hi{background:#e7efe4;color:#3f7d54}
@@ -250,6 +282,16 @@ input[type=checkbox]{accent-color:var(--accent)}
 .rc{font-family:var(--mono);font-size:11px;color:var(--muted);white-space:nowrap}
 .citelist .ct{color:var(--ink2)}
 .citelist .fulls{margin-top:4px;padding-left:16px;color:var(--muted);font-size:12px;line-height:1.7}
+/* A work Thompson starred is listed here with the star in front of its title,
+   and a *leading* star used to push that title right by its own advance plus
+   the 3px .starmark gap -- so the starred works started a few pixels inside
+   the unstarred ones right below them and the column edge went ragged.  Give
+   the star a slot two mono characters wide (one for *, two for **) and pull
+   the slot back out of the column: the star hangs in this list's left gutter
+   and every title starts on the same edge.  Right-aligned in the slot, so a
+   single * still sits against the title, the way the page prints it. */
+.citelist .fulls .starmark{display:inline-block;min-width:2ch;text-align:right;
+  margin-left:-2ch;margin-right:0}
 .ck{cursor:pointer;border-bottom:1px solid var(--faint);padding-bottom:1px;
   font-family:var(--mono);font-size:12.4px;color:#5c5344}
 .ck:hover{color:var(--accent);border-bottom-color:var(--accent);background:var(--accent-soft)}
@@ -302,6 +344,14 @@ input[type=checkbox]{accent-color:var(--accent)}
    than one motif -- same affordance, different colour so the two read apart */
 .xref.xr{color:#7a5a8e;border-color:#cbbcd6;background:#f7f4fa}
 .xref.xr:hover{background:#7a5a8e;border-color:#7a5a8e}
+/* a first-edition number: the 1955 revision dropped it and named the entry that
+   took its place ("(First ed. †X1033.)"), so it stays a link -- in the pale
+   gold of the book's own apparatus, not the accent a current number carries */
+.xref.old{color:#8a5a1f;border-color:#e2cfae;background:#fbf5e8}
+.xref.old:hover{background:#8a5a1f;border-color:#8a5a1f}
+/* the entry's own old number: a label, not a link, so no hover and no pointer */
+.xref.old:not([data-go]){cursor:default}
+.xref.old:not([data-go]):hover{background:#fbf5e8;color:#8a5a1f;border-color:#e2cfae}
 .meta{display:flex;flex-wrap:wrap;gap:14px;font-size:11.5px;color:var(--muted);margin-top:22px;
   padding-top:12px;border-top:1px solid var(--line)}
 .kv{display:flex;gap:6px}
@@ -541,7 +591,7 @@ table.stat.refs th{white-space:nowrap}
    roughly 1100px, so it wraps in steps; below 900px the browse view becomes
    single-column and the sidebar turns into a drawer behind the 目录 button.
    Wide desktops keep everything as it was, drag handle included. */
-.navtoggle{display:none;flex:0 0 auto;height:27px;padding:0 9px;border-radius:7px;
+.navtoggle{display:none;flex:0 0 auto;height:var(--ctl);padding:0 9px;border-radius:7px;
   border:1px solid var(--line);background:var(--panel2);color:var(--ink2);font-size:12.5px;line-height:1;
   white-space:nowrap}
 .navtoggle:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
@@ -565,10 +615,18 @@ table.stat.refs th{white-space:nowrap}
   #dragbar{display:none}
   #view-browse{position:relative}
   /* the drawer overlays the pane; !important beats the inline width a drag
-     may have left on the aside from a wider window */
+     may have left on the aside from a wider window.  It is a panel lying on
+     top of the page now, not a column cut into it, so its right edge takes the
+     theme's radius -- and overflow:hidden is what actually clips the filter
+     block and the list to that curve */
   aside{position:absolute;left:0;top:0;bottom:0;z-index:30;
     width:min(376px,86vw) !important;transform:translateX(-103%);
-    transition:transform .18s ease;box-shadow:none}
+    transition:transform .18s ease;box-shadow:none;
+    border-radius:0 14px 14px 0;overflow:hidden}
+  /* the rounded edge means the scrollbar no longer runs the full height; a
+     drawer is a gesture target as much as a click target, so it goes */
+  aside #scroller{scrollbar-width:none}
+  aside #scroller::-webkit-scrollbar{display:none}
   #view-browse.drawer-open aside{transform:none;box-shadow:8px 0 26px rgba(40,25,10,.20)}
 }
 @media(max-width:700px){
@@ -591,11 +649,12 @@ table.stat.refs th{white-space:nowrap}
   .tabs::-webkit-scrollbar{display:none}
   .qmode button{padding:3px 6px}
   .dnum{font-size:19px !important}
-  /* a long title on a phone would otherwise squeeze the confidence chip out of
-     shape: let the row wrap, and keep the chip on the right of whatever line
+  /* the number and the local chip share a line; on a narrow screen let them
+     wrap rather than squeeze, and keep the chip on the right of whatever line
      it lands on (auto margin, plus the column gap as a floor) */
-  .dtitle.confrow{flex-wrap:wrap;gap:6px 10px}
-  .dtitle.confrow>.conf{margin-left:auto}
+  .dnum.confrow{flex-wrap:wrap;gap:4px 10px}
+  /* the jump box is a fingertip target on a phone, not a 19px line */
+  .treehead .jump{height:24px;font-size:13px;line-height:22px}
   /* touch targets: taller rows, a triangle worth a fingertip */
   :root{--row:36px}
   .row{font-size:13.5px;gap:7px;padding-right:12px}

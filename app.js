@@ -15,6 +15,11 @@ var SOLO = D.solo || [];   /* bold group headings with no entries beneath them *
 var FFCTITLES = D.ffc || {};  /* FFC publication number -> title (see tools/fetch_ffc.py) */
 var RREFMAP = new Map();      /* motif index -> entries citing it (built lazily) */
 (window.MI.rrefs || []).forEach(function (pair) { RREFMAP.set(pair[0], pair.slice(1)); });
+/* Numbers this edition no longer prints but keeps citing: the revision put the
+   old one in front of the entry that replaced it ("X1030.1 … (First ed.
+   †X1033.)"), so OLD -> the number that carries it now.  Only consulted for a
+   target that has no entry of its own -- see xrefOne() in 60-pane.js. */
+var OLDMAP = new Map(window.MI.oldnum || []);
 var KINDLABEL = { geo: '地区', people: '民族 · 族群', text: '文献 · 宗教传统' };
 var KINDORDER = ['geo', 'people', 'text'];
 var BIBLIO = D.bib || [];
@@ -1145,6 +1150,7 @@ var state = {
   resCapped: false,  // search hit MAX_RES
   shownRes: 0,       // how many results the right-hand list has rendered
   resScroll: 0,      // its scroll offset, restored when coming back from a detail
+  folds: Object.create(null),  // sections the reader has folded shut, by key
   paneMode: ''       // 'search' | 'detail' | 'chapter' | 'div' | 'empty'
 };
 
@@ -2251,7 +2257,36 @@ function cmpNum(a, b) {
 function rangeLabel(ch, lo, ch2, hi) {
   return ch + lo + '\u2013' + (ch2 && ch2 !== ch ? ch2 : ch) + hi;
 }
-function xrefOne(m, ch, num, dash, ch2, hi, suf) {
+/* the entry on screen.  A first-edition number that maps back to the page the
+   reader is already on is a label, not a link, and xrefOne() has no other way
+   to know which page that is -- the same reason xrefList() takes no context. */
+var CURMOT = null;
+/* A dagger that does not point at a motif.  "… Deutsche Volkslieder Archiv
+   (MS. Freiburg im Breisgau and University of Chicago) Nos. †A74020, †A72356,
+   …" and "… L'Ame du Murundi 340ff. No. †E5, 345f. No. †E7" put the dagger on
+   a catalogue number of the work being cited.  Read as motifs they are four
+   unknown numbers in one note and two more in another; the page means none of
+   them as one.  The test is the label in front -- "No." / "Nos.", or a comma
+   inside the run that label opened. */
+function catNumAt(t, i) {
+  if (i === undefined) return false;
+  var back = t.slice(Math.max(0, i - 48), i);
+  if (/\bNos?\.\s*$/.test(back)) return true;
+  return /\bNos?\.\s*\u2020\s?[A-Z]?\d[\d.]*\s*,\s*(?:\u2020\s?[A-Z]?\d[\d.]*\s*,\s*)*$/.test(back);
+}
+/* how many of a text's daggers are catalogue numbers.  xrefList() drops them
+   silently, so an entry that has nothing else would otherwise claim to carry
+   no dagger at all -- which is exactly what the reader can see is untrue. */
+function catNumCount(t) {
+  var n = 0;
+  (t || '').replace(RE_XREF, function (mm, ch, num, dash, ch2, hi, suf, off, str) {
+    if (catNumAt(str, off)) n++;
+    return mm;
+  });
+  return n;
+}
+function xrefOne(m, ch, num, dash, ch2, hi, suf, off, src) {
+  if (catNumAt(src, off)) return m;
   if (dash && hi && cmpNum(num, hi) < 0) {
     var di = divOfRange(ch, num, hi, ch2);
     if (di >= 0) {
@@ -2275,7 +2310,19 @@ function xrefOne(m, ch, num, dash, ch2, hi, suf) {
     }
   }
   var full = ch + num, j = byNum.get(full);
-  if (j === undefined) return '<span class="xref dangling">' + full + (suf || '') + '</span>';
+  if (j === undefined) {
+    /* a first-edition number.  The entry that replaced it says so itself, so
+       the number is not lost -- only the entry page it names is.  103 of the
+       104 are the entry's own old number ("X1030.1 … (First ed. †X1033.)"),
+       which would be a link to the page the reader is already on; that one is
+       a label.  The rest point elsewhere and stay clickable. */
+    var now = OLDMAP.get(full);
+    if (now) return now === CURMOT
+      ? '<span class="xref old" title="第一版编号（本版即此条）">' + full + (suf || '') + '</span>'
+      : '<span class="xref old" data-go="' + now + '" title="第一版编号：本版为 ' + now + '">' +
+        full + (suf || '') + '</span>';
+    return '<span class="xref dangling">' + full + (suf || '') + '</span>';
+  }
   return '<span class="xref" data-go="' + full + '" title="跳转到 ' + full + '">' + full + (suf || '') + '</span>';
 }
 function xrefHTML(t) {
@@ -2284,14 +2331,15 @@ function xrefHTML(t) {
 /* the same decoration for slices of a longer string: the † reference gets
    its chip (dangling targets included), the surrounding text is escaped */
 function xesc(s) {
-  return esc(s).replace(RE_XREF, function (mm, ch, num, dash, ch2, hi, suf) {
-    return xrefOne(null, ch, num, dash, ch2, hi, suf);
+  return esc(s).replace(RE_XREF, function (mm, ch, num, dash, ch2, hi, suf, off, str) {
+    return xrefOne(mm, ch, num, dash, ch2, hi, suf, off, str);
   });
 }
 /* the same scan, but as a de-duplicated list for the "cross references" block */
 function xrefList(t) {
   var out = [], seen = Object.create(null);
-  (t || '').replace(RE_XREF, function (mm, ch, num, dash, ch2, hi) {
+  (t || '').replace(RE_XREF, function (mm, ch, num, dash, ch2, hi, suf, off, str) {
+    if (catNumAt(str, off)) return mm;
     var item = null, key;
     if (dash && hi && cmpNum(num, hi) < 0) {
       var di = divOfRange(ch, num, hi, ch2);
@@ -2552,29 +2600,36 @@ function grpCrumbHTML(g) {
 }
 /* ---- parse confidence ----
    D.conf is published metadata: one number per entry out of the deterministic
-   split/token analysis at build time (1.00 = the note is a single source
-   head).  The chip stands at the right end of the entry page's title line,
-   beside the number and the catchword it is a statement *about*.  It used to
-   ride at the end of the action row's step group, where it read as one more
-   navigation control -- the row is all "how do I leave this page", and a
-   parse-quality number is not that.  The local layer replaces its value with
-   the runtime one, so both flavours share this markup.  The three tints only
-   have to separate "trust at a glance" from "look again": hi >= .90,
-   mid >= .72, lo below (the corpus median is .78). */
-function confChipHTML(v) {
-  var band = v >= 0.9 ? 'c-hi' : v >= 0.72 ? 'c-mid' : 'c-lo';
-  return '<span class="conf ' + band + '" title="解析自信度：按切分与标注的确定性分析预计算，' +
-    '1.00 表示注记只有单一来源头。本地模式下该值会按已检条目的形状相似度上调。">置信度 ' +
-    v.toFixed(2) + '</span>';
+   split/token analysis at build time (1.00 = the note is a single source head).
+
+   It used to be a pill printed beside every entry's number ("置信度 1.00").
+   That pill was one number too many: on a page read entry after entry it is
+   noise, and it crowded the number it grades.  The value now rides on the
+   number itself as a tooltip -- there when the reader asks, invisible when
+   they do not -- which is also the only place it can sit without competing
+   with the label.  confText() is that sentence.
+
+   The pale chip has not gone away: the local layer still prints it, because
+   there the number is the reader's own verdict (see 96-local.js) and it has to
+   change as entries get checked.  Nothing in the published copy builds one. */
+function confText(v) {
+  return '解析自信度 ' + v.toFixed(2) + '：按切分与标注的确定性分析预计算，' +
+    '1.00 表示注记只有单一来源头。悬停编号即可看到。';
+}
+function confAttr(i) {
+  var v = (D.conf && D.conf[i]) || 0;
+  return ' title="' + confText(v) + '"';
 }
 function renderPane() {
   var pane = document.getElementById('pane');
+  CURMOT = null;                 /* no entry page: no self-reference to compare */
   if (state.selCh >= 0) { state.paneMode = 'chapter'; renderChapterPane(state.selCh); return; }
   if (state.selDiv >= 0) { state.paneMode = 'div'; renderDivPane(state.selDiv); return; }
   if (state.selGrp >= 0) { state.paneMode = 'group'; renderGrpPane(state.selGrp); return; }
   if (state.sel < 0) { state.paneMode = 'empty'; pane.innerHTML = paneEmpty(); return; }
   state.paneMode = 'detail';
   var i = state.sel, m = MO[i];
+  CURMOT = m[0];
   var ks = keysOf(m[5]), rs = groupSpans(m[5]);
   var uniq = xrefAll(m);
 
@@ -2590,8 +2645,8 @@ function renderPane() {
      is what the published copy ships (the local fragment is cut before upload).
 
      Nothing in this row is *about the entry*: every control is a way out of
-     the page.  The parse-confidence chip is exactly the opposite, which is why
-     it now stands in the head instead (see confChipHTML). */
+     the page.  The parse confidence is exactly the opposite -- it is a note on
+     the number, so it rides on the number as a tooltip (see confText). */
   var acts =
     '<button class="btn" data-act="tree">在分类树中定位</button>' +
     '<span class="loctools" id="loctools"></span>' +
@@ -2613,15 +2668,13 @@ function renderPane() {
   h += backBar(acts);      /* generic: wherever this page was reached from */
   var sp = splitName(i);
   h += '<div class="dhead">';
-  h += '<div class="dnum">' + esc(m[0]) + '</div>';
-  /* The title line carries the confidence chip at its far right: the number,
-     the catchword and "how far this parse can be trusted" belong to the same
-     statement.  .dtxt holds the title so the chip has something to sit beside
-     -- .dtitle is inline content (prose with xref chips in it), and only a
-     wrapper keeps that flowing as text once the row becomes a flex line. */
-  h += '<div class="dtitle confrow"><span class="dtxt">' +
-    (sp.name ? '<span class="ttl">' + xrefHTML(sp.name) + '</span>' : renderDesc(i)) +
-    '</span>' + (D.conf ? confChipHTML(D.conf[i] || 0) : '') + '</div>';
+  /* The number line carries the parse confidence as a tooltip: one entry out
+     of 46,251 is read as a page, and a permanent "置信度 1.00" beside every
+     number is a column of identical pills that tells the reader nothing new.
+     Hovering the label that the number grades is where the answer belongs. */
+  h += '<div class="dnum"' + (D.conf ? confAttr(i) : '') + '>' + esc(m[0]) + '</div>';
+  h += '<div class="dtitle">' +
+    (sp.name ? '<span class="ttl">' + xrefHTML(sp.name) + '</span>' : renderDesc(i)) + '</div>';
   /* the mark can sit on either half: A2091 prints "Origin of spider.†1 (Cf.
      †A1751.)", where the catchword is the name and the dagger is in the rest */
   if (sp.name && sp.rest) h += '<div class="ddesc">' + fnHTML(xrefHTML(sp.rest), m[0]) + '</div>';
@@ -2655,12 +2708,18 @@ function renderPane() {
         if (x.k === 'd')
           return '<span class="xref xr" data-god="' + x.i + '" title="跳转到分类 ' + x.lab + '">' +
             x.lab + '</span>';
-        var ok = byNum.has(x.n);
+        var ok = byNum.has(x.n), old = ok ? null : OLDMAP.get(x.n);
         return ok ? '<span class="xref" data-go="' + x.n + '">' + x.n + '</span>'
+          : old === m[0] ? '<span class="xref old" title="第一版编号（本版即此条）">' + x.n + '</span>'
+          : old ? '<span class="xref old" data-go="' + old +
+              '" title="第一版编号：本版为 ' + old + '">' + x.n + '</span>'
           : '<span class="xref dangling" title="索引中无此编号">' + x.n + '</span>';
       }).join('') + '</div></div>';
   } else {
-    h += '<div class="sect"><h3>内部跳转 · 交叉引用</h3><div class="hint">条目原文中没有 †编号 形式的交叉引用</div></div>';
+    var ncat = catNumCount(m[4]) + catNumCount(m[5]);
+    h += '<div class="sect"><h3>内部跳转 · 交叉引用</h3><div class="hint">' +
+      (ncat ? '条目原文里的 †编号是所引著作的藏品号或档案号，不是母题编号'
+            : '条目原文中没有 †编号 形式的交叉引用') + '</div></div>';
   }
 
   h += atuSectionHTML(m[0]);
@@ -2712,11 +2771,40 @@ function renderPane() {
     '<span class="kv"><b>引用条目数</b><span>' + ks.length + '</span></span>' +
     '<span class="kv"><b>所属分类</b><span>' + (MO[i][2] >= 0 ? esc(DV[MO[i][2]][3]) : '—') + '</span></span>' +
     '</div></div>';
-  /* localDecorate swaps the base confidence chip for the runtime one and adds
-     the local checkbox; the published copy has the fragment cut out, and the
-     typeof guard is what makes that cut safe */
+  /* localDecorate puts the runtime confidence back on the number (as a chip)
+     and adds the local checkbox; the published copy has the fragment cut out,
+     and the typeof guard is what makes that cut safe */
   pane.innerHTML = typeof localDecorate === 'function' ? localDecorate(i, h) : h;
   pane.scrollTop = 0;
+}
+/* ---- a section the reader may put away ----
+   The ATU section on a detail page and the one the search pane grows are lists
+   of reference material: up to forty rows of types the reader did not search
+   for, sitting between them and the entry they did open.  Hiding the tail
+   behind "…另 N 个" was the wrong trade -- the count is printed in the heading
+   anyway, so a reader who wants the tail has to go to another page to see what
+   the number meant.  The whole list ships; the heading is a handle, and a
+   reader who does not want it folds it shut.
+
+   state.folds remembers which ones are shut, because the pane is repainted on
+   every navigation and a fold that reopened itself would be a fold the reader
+   has to keep making.  The body is one wrapper so the toggle never has to know
+   what it is hiding. */
+function foldSect(key, title, body) {
+  var open = !state.folds[key];
+  return '<div class="sect foldable' + (open ? '' : ' closed') + '">' +
+    '<h3 class="foldh" data-fold="' + esc(key) + '" role="button" tabindex="0"' +
+    ' aria-expanded="' + (open ? 'true' : 'false') + '"' +
+    ' title="' + (open ? '折叠这一段' : '展开这一段') + '">' + title + '</h3>' +
+    '<div class="foldbody">' + body + '</div></div>';
+}
+function toggleFold(h3) {
+  var key = h3.getAttribute('data-fold');
+  var shut = !/closed/.test(h3.parentNode.className);
+  h3.parentNode.classList.toggle('closed', shut);
+  state.folds[key] = shut ? 1 : 0;
+  h3.setAttribute('aria-expanded', shut ? 'false' : 'true');
+  h3.title = shut ? '展开这一段' : '折叠这一段';
 }
 /* ---- the entry as the book prints it ----
    m[8] holds the whole line as it came out of the PDF text layer, before the
@@ -3340,19 +3428,19 @@ function renderATUType(i) {
   var pr2 = document.querySelector('#view-atu .page');
   if (pr2) pr2.scrollTop = 0;
 }
-/* the strip a motif page grows when the ATU index knows this motif */
+/* the strip a motif page grows when the ATU index knows this motif.  No tail is
+   hidden: the longest such list is ten types, and a count in the heading with
+   the rest behind "…另 N 个" made the reader leave the page to find out which
+   ones.  The heading folds the list instead (foldSect). */
 function atuSectionHTML(num) {
   var at = ATM[num];
   if (!at || !at.length) return '';
-  var cap = 24;
-  var h = '<div class="sect"><h3>见于 ATU 故事类型（' + at.length + '）</h3><div class="atulist">' +
-    at.slice(0, cap).map(function (i) {
-      var r = ATY[i];
-      return '<div><span class="xref at" data-atu="' + i + '">ATU ' + r[0] + '</span> ' +
-        '<span class="hint">' + esc(clip(atuName(r), 56)) + '</span></div>';
-    }).join('') + '</div>';
-  if (at.length > cap) h += '<div class="hint">…另 ' + (at.length - cap) + ' 个类型</div>';
-  return h + '</div>';
+  var body = '<div class="atulist">' + at.map(function (i) {
+    var r = ATY[i];
+    return '<div><span class="xref at" data-atu="' + i + '">ATU ' + r[0] + '</span> ' +
+      '<span class="hint">' + esc(clip(atuName(r), 56)) + '</span></div>';
+  }).join('') + '</div>';
+  return foldSect('atu:' + num, '见于 ATU 故事类型（' + at.length + '）', body);
 }
 
 /* ============================ stats view ============================ */
@@ -3604,6 +3692,15 @@ function renderTags() {
 
 
 /* ============================ views / wiring ============================ */
+/* the floating 顶部 button: which box raised it, and the button itself.  It has
+   to be reachable from setView -- the box that scrolled can be hidden a moment
+   later by a tab, and a button left pointing at a display:none column floats
+   over the page it is not about */
+var TOTOP = null, TOTOP_LAST = null;
+function hideTotop() {
+  TOTOP_LAST = null;
+  if (TOTOP) TOTOP.classList.remove('on');
+}
 function setView(v) {
   /* remember where the leaving view was scrolled, put the entering view back
      where it was -- display:none keeps the DOM but not the reader's place */
@@ -3645,6 +3742,8 @@ function setView(v) {
   document.querySelectorAll('.tabs button').forEach(function (b) {
     b.classList.toggle('on', b.getAttribute('data-view') === v);
   });
+  /* the column that raised it is about to be hidden */
+  hideTotop();
   if (v === 'refs') { state.refKey = null; renderRefs(); }
   if (v === 'atu') renderATU();
   if (v === 'tags') renderTags();
@@ -3728,6 +3827,19 @@ function scrollToTop() {
   var pn = document.getElementById('pane');
   if (pn) pn.scrollTop = 0;
 }
+/* a jump inside one page -- a letter in the works index, a range on the ATU
+   page.  Same ease as the back-to-top button: the click says where to go, and
+   arriving instantly makes the reader lose the thread of the page they were
+   reading.  Readers who ask their system for less motion get the teleport. */
+function jumpTo(el) {
+  if (!el || !el.scrollIntoView) return;
+  var calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  try {
+    el.scrollIntoView({ behavior: calm ? 'auto' : 'smooth', block: 'start' });
+  } catch (e) {
+    try { el.scrollIntoView(); } catch (e2) { /* jsdom has no layout */ }
+  }
+}
 
 /* ---------------------------- search result list ----------------------------
    Bounded work per frame: the pane renders RES_CHUNK rows at a time and the
@@ -3801,26 +3913,24 @@ function renderSearchPane(q, want) {
    so a query should be able to reach either half of the pair */
 function atuSearchHTML(q) {
   if (!ATU || !q) return '';
-  var s = String(q).toLowerCase(), hits = [], i;
+  var s = String(q).toLowerCase(), hits = [], i, capped = false;
   for (i = 0; i < ATY.length; i++) {
     var r = ATY[i];
     if (String(r[0]).indexOf(s) === 0 ||
         (s.length >= 3 && ((r[1] || '').toLowerCase().indexOf(s) >= 0 ||
                            (r[2] || '').toLowerCase().indexOf(s) >= 0))) {
-      if (hits.push(i) >= 40) break;
+      if (hits.push(i) >= 40) { capped = true; break; }
     }
   }
   if (!hits.length) return '';
-  var cap = 12;
-  return '<div class="sect"><h3>ATU 故事类型（' + hits.length + (hits.length >= 40 ? '+' : '') + '）</h3>' +
-    '<div class="atulist">' + hits.slice(0, cap).map(function (k) {
-      var r = ATY[k];
-      return '<div><span class="xref at" data-atu="' + k + '">ATU ' + r[0] + '</span> ' +
-        '<span class="hint">' + esc(clip(atuName(r), 60)) + '</span></div>';
-    }).join('') + '</div>' +
-    (hits.length > cap
-      ? '<div class="hint">…另 ' + (hits.length - cap) + ' 个，到「类型 · ATU」页看全部</div>'
-      : '') + '</div>';
+  /* every hit is printed -- the section folds (foldSect) instead of hiding its
+     tail, so a reader who sees "（13）" can count thirteen rows */
+  var body = '<div class="atulist">' + hits.map(function (k) {
+    var r = ATY[k];
+    return '<div><span class="xref at" data-atu="' + k + '">ATU ' + r[0] + '</span> ' +
+      '<span class="hint">' + esc(clip(atuName(r), 60)) + '</span></div>';
+  }).join('') + '</div>';
+  return foldSect('atusearch', 'ATU 故事类型（' + hits.length + (capped ? '+' : '') + '）', body);
 }
 /* the strip shown on a detail page: a generic "back to where I came from"
    (which covers a cross-reference hop as much as a search result) plus, while
@@ -3941,11 +4051,7 @@ function boot() {
     var sortb = t.closest ? t.closest('[data-sort]') : null;
     if (sortb) { state.litSort = sortb.getAttribute('data-sort'); renderRefs(); return; }
     var jump = t.closest ? t.closest('[data-jump]') : null;
-    if (jump) {
-      var tgt = document.getElementById('lit-' + jump.getAttribute('data-jump'));
-      if (tgt && tgt.scrollIntoView) { try { tgt.scrollIntoView(); } catch (e) { /* jsdom */ } }
-      return;
-    }
+    if (jump) { jumpTo(document.getElementById('lit-' + jump.getAttribute('data-jump'))); return; }
     if (t.id === 'qclear') { setQuery(''); applyQuery(''); state.q = ''; document.getElementById('q').focus(); return; }
     var qmb = t.closest ? t.closest('#qmode button') : null;
     if (qmb) { setAdvMode(qmb.getAttribute('data-qm') === 'adv'); return; }
@@ -3959,6 +4065,10 @@ function boot() {
     }
     var tog = t.closest ? t.closest('[data-tog]') : null;
     if (tog) { ev.stopPropagation(); toggleExpand(tog.getAttribute('data-tog')); return; }
+    /* a section heading that folds its body (the ATU lists): reference
+       material, printed whole but put away on request */
+    var foldh = t.closest ? t.closest('[data-fold]') : null;
+    if (foldh) { toggleFold(foldh); return; }
     /* the group page's nested member list: a click on the row folds or
        unfolds that entry's subentries (the number itself still navigates) */
     var togm = t.closest ? t.closest('[data-togm]') : null;
@@ -4049,8 +4159,7 @@ function boot() {
     }
     var atj = t.closest ? t.closest('[data-atujump]') : null;
     if (atj) {
-      var tgt = document.getElementById('atuc-' + atj.getAttribute('data-atujump'));
-      if (tgt && tgt.scrollIntoView) { try { tgt.scrollIntoView(); } catch (e) { /* jsdom */ } }
+      jumpTo(document.getElementById('atuc-' + atj.getAttribute('data-atujump')));
       return;
     }
     var key = t.closest ? t.closest('[data-key]') : null;
@@ -4161,6 +4270,12 @@ function boot() {
     else if (ev.key === 'Enter' && ev.target.id === 'numjump') {
       var v = ev.target.value.trim(); if (v) { if (!goTo(v)) toast('未找到 ' + v); ev.target.value = ''; }
     } else if (ev.key === 'Enter' && ev.target.id === 'q') { applyQuery(ev.target.value.trim(), false, true); ev.target.blur(); }
+    /* the fold heading is a button, so it answers to the keyboard too */
+    else if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.hasAttribute &&
+             ev.target.hasAttribute('data-fold')) {
+      ev.preventDefault();
+      toggleFold(ev.target);
+    }
     /* Alt+↑ / Alt+↓ step to the previous / next entry on any page that shows
        one -- the keyboard twin of the two buttons in the action row.  Alt is
        required because a bare arrow key belongs to whichever panel has focus,
@@ -4180,28 +4295,31 @@ function boot() {
   window.addEventListener('hashchange', routeFromHash);
   window.addEventListener('popstate', onPop);   /* Back / Forward between pages */
 
-  /* floating back-to-top: for the four long .page views -- the browse tree
-     and detail pane scroll all the time and a fixed button is in the way
-     there, so those containers are skipped */
-  var totop = document.getElementById('totop'), lastScroller = null;
+  /* floating back-to-top: the long .page views and the search results both
+     want it.  It stays out of the browse tree (#scroller) and out of a detail
+     page (#pane in any mode but 'search'): there it would sit on top of the
+     text, and those two columns already scroll under the pointer.  The test is
+     on what is showing, not only on which box scrolled -- the results list and
+     a detail page share #pane, and skipping #pane for the sake of the detail
+     page is what had quietly taken the button off the search page. */
+  var totop = TOTOP = document.getElementById('totop');
+  function totopWanted(t) {
+    if (!t || t === document || typeof t.scrollTop !== 'number') return null;
+    if (t.id === 'scroller') return null;
+    if (t.id === 'pane' && state.paneMode !== 'search') return null;
+    return t;
+  }
   document.addEventListener('scroll', function (ev) {
-    var t = ev.target;
-    if (!t || t === document || typeof t.scrollTop !== 'number') return;
-    if (t.id === 'scroller' || t.id === 'pane') {
-      lastScroller = null;
-      if (totop) totop.classList.remove('on');
-      return;
-    }
-    lastScroller = t.scrollTop > 480 ? t : null;
-    if (totop) totop.classList.toggle('on', !!lastScroller);
+    var t = totopWanted(ev.target);
+    TOTOP_LAST = t && t.scrollTop > 480 ? t : null;
+    if (totop) totop.classList.toggle('on', !!TOTOP_LAST);
   }, true);
   if (totop) totop.addEventListener('click', function () {
-    if (lastScroller && lastScroller.offsetParent) {
-      if (lastScroller.scrollTo) try { lastScroller.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { lastScroller.scrollTop = 0; }
-      else lastScroller.scrollTop = 0;
+    if (TOTOP_LAST && TOTOP_LAST.offsetParent) {
+      if (TOTOP_LAST.scrollTo) try { TOTOP_LAST.scrollTo({ top: 0, behavior: 'smooth' }); } catch (e) { TOTOP_LAST.scrollTop = 0; }
+      else TOTOP_LAST.scrollTop = 0;
     }
-    lastScroller = null;
-    totop.classList.remove('on');
+    hideTotop();
   });
 
   var nb = document.getElementById('navback'), nf = document.getElementById('navfwd');
@@ -4264,7 +4382,16 @@ function routeFromHash() {
   if (q !== state.q) { setQuery(q); applyQuery(q, true); }
   if (v !== state.view) setView(v);
   if (v === 'refs') {
-    if (k) { state.refKey = k; renderSourceDetail(k); }
+    /* `k` names the abbreviation whose page is open; a refs hash without one is
+       the index itself.  Coming back to the index (Back out of a source page,
+       or Forward to it) has to *clear* refKey and repaint: without this the
+       stale key stayed in state, updateURLState() wrote it straight back into
+       the hash, and Back landed on the very page it had left. */
+    var wantKey = k || null;
+    if (wantKey !== state.refKey) {
+      state.refKey = wantKey;
+      if (wantKey) renderSourceDetail(wantKey); else renderRefs();
+    }
     updateURLState(false);
     return;
   }

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Motif-Index of Folk-Literature — 母题索引可视化</title>
-<link rel="stylesheet" href="app.css?v=3590369">
+<link rel="stylesheet" href="app.css?v=9c5317d">
 </head>
 <body>
 
@@ -41,21 +41,17 @@
   <section id="view-browse" class="view on">
     <aside id="sidebar">
       <div class="filters">
-        <div class="frow">
-          <span class="flabel">章</span>
-          <div class="chips" id="chips"></div>
+        <div class="chips" id="chips"></div>
+        <div class="frow fbar">
           <button class="linkbtn" id="chall">全选</button>
           <button class="linkbtn" id="chnone">清空</button>
-        </div>
-        <div class="frow">
-          <button class="linkbtn" id="resetall">重置</button>
           <span id="fstat"></span>
+          <button class="linkbtn" id="resetall">重置</button>
         </div>
       </div>
       <div class="treehead">
         <b id="treelabel">分类树</b>
-        <input id="numjump" placeholder="跳转编号" spellcheck="false"
-               style="width:88px;padding:2px 6px;border:1px solid var(--line);border-radius:5px;font:600 11.5px var(--mono);background:var(--panel2)">
+        <input id="numjump" class="jump" placeholder="跳转编号" spellcheck="false">
         <span class="hint" id="treecount"></span>
       </div>
       <div id="scroller">
@@ -145,13 +141,20 @@
           星号得放在词的中间或末尾。
           解析失败时搜索框下方会指出出错的字符位置；查询经 URL 的 <code>adv=1</code> 分享。
         </p>
-        <p style="color:var(--ink2);font-size:13px;line-height:1.85;margin:10px 0 0">
-          结果可随后排序：<code>| sort: [reverse] &lt;键&gt;</code>。键取
-          <code>body-length</code>（注记长度）、<code>head-length</code>（词头长度）、
-          <code>label</code>（编号自然序）、<code>confidence</code>（解析把握）、
-          <code>subentry-number</code>（子母题数）；<code>reverse</code> 反序，
-          <code>then: &lt;键&gt;</code> 接平局链。例：
-          <code>has: cite | sort: reverse body-length</code>。
+        <p style="color:var(--ink2);font-size:13px;line-height:1.85;margin:16px 0 10px">
+          条件写完之后可以接一段排序：<code>| sort: [reverse] &lt;键&gt;</code>，
+          <code>reverse</code> 取反序，<code>then: &lt;键&gt;</code> 接平局链。
+          排序键和上面 <code>filter</code> 的取值一样，是可枚举的几个词：
+        </p>
+        <table class="stat feat"><tbody>
+          <tr><td>body-length</td><td style="color:var(--ink2)">文献注记的长度（字符数）</td></tr>
+          <tr><td>head-length</td><td style="color:var(--ink2)">斜体词头的长度；没有词头的条目为 0</td></tr>
+          <tr><td>label</td><td style="color:var(--ink2)">母题编号的自然序（<code>A1</code> 在 <code>A2</code> 前、<code>A10</code> 在 <code>A9</code> 后），即列表的默认顺序</td></tr>
+          <tr><td>confidence</td><td style="color:var(--ink2)">解析把握：条目编号悬停显示的那个数（本地模式下按已检查条目重算）</td></tr>
+          <tr><td>subentry-number</td><td style="color:var(--ink2)">子母题数</td></tr>
+        </tbody></table>
+        <p style="color:var(--ink2);font-size:13px;line-height:1.85;margin:12px 0 0">
+          例：<code>has: cite | sort: reverse body-length</code> —— 有文献注记的条目，按注记从长到短排。
         </p>
       </div>
 
@@ -181,7 +184,7 @@
 <button id="totop" title="回到顶部">↑ 顶部</button>
 <div class="toast" id="toast"></div>
 
-<script src="build/data.js?v=3590369"></script>
-<script src="app.js?v=3590369"></script>
+<script src="build/data.js?v=9c5317d"></script>
+<script src="app.js?v=9c5317d"></script>
 </body>
 </html>
